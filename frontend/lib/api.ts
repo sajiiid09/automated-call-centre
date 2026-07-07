@@ -128,6 +128,12 @@ export const getCampaign = (id: string) => request<CampaignDetail>(`/api/campaig
 export const deleteCampaign = (id: string) =>
   request<void>(`/api/campaigns/${id}`, { method: "DELETE" });
 
+export const startCampaign = (id: string) =>
+  request<Campaign>(`/api/campaigns/${id}/start`, { method: "POST" });
+
+export const stopCampaign = (id: string) =>
+  request<Campaign>(`/api/campaigns/${id}/stop`, { method: "POST" });
+
 // --- Calls ---
 
 export const listCalls = () => request<Call[]>("/api/calls");

@@ -84,19 +84,43 @@ class CallSession:
         self.campaign_id = campaign_id
         self.call_id: uuid.UUID | None = None
 
+    @property
+    def is_campaign_call(self) -> bool:
+        return self.campaign_id is not None and self.contact_id is not None
+
     async def start(self) -> uuid.UUID:
         self.call_id = await asyncio.to_thread(
             _create_call_row, self.direction, self.contact_id, self.campaign_id
         )
+        if self.is_campaign_call:
+            await asyncio.to_thread(self._mark_calling)
         return self.call_id
+
+    def _mark_calling(self) -> None:
+        from app.services import dialer
+
+        with SessionLocal() as db:
+            dialer.mark_calling(db, self.campaign_id, self.contact_id)
+
+    def _advance_campaign(self, call_ok: bool) -> None:
+        from app.services import dialer
+
+        with SessionLocal() as db:
+            dialer.advance_after_call(db, self.campaign_id, self.contact_id, call_ok)
 
     async def on_turn(self, role: str, content: str) -> None:
         if self.call_id is not None:
             await asyncio.to_thread(_save_turn, self.call_id, role, content)
 
     async def finish(self, status: str = "completed") -> None:
-        if self.call_id is not None:
-            await asyncio.to_thread(_finalize_call, self.call_id, status)
+        if self.call_id is None:
+            return
+        await asyncio.to_thread(_finalize_call, self.call_id, status)
+        if self.is_campaign_call:
+            from app.services.disposition import classify_call
+
+            await asyncio.to_thread(classify_call, self.call_id)
+            await asyncio.to_thread(self._advance_campaign, status == "completed")
 
     async def build_config(self) -> CallConfig:
         contact_name, goal, script = await asyncio.to_thread(

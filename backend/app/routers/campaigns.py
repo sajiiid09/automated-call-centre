@@ -107,6 +107,22 @@ def update_campaign(campaign_id: uuid.UUID, payload: CampaignUpdate, db: Session
     return _to_out(_get_or_404(db, campaign.id))
 
 
+@router.post("/{campaign_id}/start", response_model=CampaignOut)
+def start_campaign(campaign_id: uuid.UUID, db: Session = Depends(get_db)):
+    from app.services import dialer
+
+    dialer.start_campaign(db, campaign_id)
+    return _to_out(_get_or_404(db, campaign_id))
+
+
+@router.post("/{campaign_id}/stop", response_model=CampaignOut)
+def stop_campaign(campaign_id: uuid.UUID, db: Session = Depends(get_db)):
+    from app.services import dialer
+
+    dialer.stop_campaign(db, campaign_id)
+    return _to_out(_get_or_404(db, campaign_id))
+
+
 @router.delete("/{campaign_id}", status_code=204)
 def delete_campaign(campaign_id: uuid.UUID, db: Session = Depends(get_db)):
     db.delete(_get_or_404(db, campaign_id))

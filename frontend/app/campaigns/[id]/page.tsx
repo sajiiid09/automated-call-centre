@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { CampaignDetail, getCampaign } from "@/lib/api";
+import { CallWidget } from "@/components/call-widget";
+import {
+  CampaignDetail,
+  getCampaign,
+  startCampaign,
+  stopCampaign,
+} from "@/lib/api";
 
 const contactStatusVariant: Record<string, "secondary" | "default" | "outline" | "destructive"> = {
   pending: "secondary",
@@ -43,11 +49,39 @@ export default function CampaignDetailPage({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch, setState after await
     refresh();
+    const interval = setInterval(refresh, 4000);
+    return () => clearInterval(interval);
   }, [refresh]);
+
+  async function handleStart() {
+    try {
+      await startCampaign(id);
+      toast.success("Campaign started — answer each contact below to simulate the call");
+      refresh();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+
+  async function handleStop() {
+    try {
+      await stopCampaign(id);
+      toast.success("Campaign stopped");
+      refresh();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
 
   if (!campaign) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
+
+  const running = campaign.status === "running";
+  // sequential dialer: only the first non-finished contact is actionable
+  const nextRow = running
+    ? campaign.contact_rows.find((r) => r.status === "pending" || r.status === "calling")
+    : undefined;
 
   return (
     <div>
@@ -68,10 +102,42 @@ export default function CampaignDetailPage({
           )}
         </div>
         <div className="flex gap-2">
-          {/* Start/Stop wired in Stage C */}
-          <Button disabled>Start campaign</Button>
+          {campaign.status === "draft" || campaign.status === "stopped" ? (
+            <Button onClick={handleStart}>Start campaign</Button>
+          ) : running ? (
+            <Button variant="destructive" onClick={handleStop}>
+              <Square className="mr-1 h-4 w-4" /> Stop
+            </Button>
+          ) : null}
         </div>
       </div>
+
+      {running && nextRow && (
+        <Card className="mb-6 border-primary/50">
+          <CardHeader>
+            <CardTitle className="text-sm">
+              Next call: {nextRow.contact.name} ({nextRow.contact.phone})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-4">
+            <p className="max-w-md text-sm text-muted-foreground">
+              Twilio isn&apos;t connected yet, so answer this call in the browser and
+              play the contact — the agent follows the campaign script and the
+              outcome is tagged automatically.
+            </p>
+            <CallWidget
+              key={nextRow.contact.id}
+              label={`Answer as ${nextRow.contact.name}`}
+              context={{
+                direction: "outbound",
+                contact_id: nextRow.contact.id,
+                campaign_id: campaign.id,
+              }}
+              onCallEnded={refresh}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {campaign.script_prompt && (
         <Card className="mb-6">
@@ -112,6 +178,11 @@ export default function CampaignDetailPage({
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">
                   {row.disposition ?? "—"}
+                  {row.disposition_summary && (
+                    <span className="block max-w-xs truncate text-xs">
+                      {row.disposition_summary}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell>
                   {row.call_id && (
