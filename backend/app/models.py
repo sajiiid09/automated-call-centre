@@ -19,9 +19,7 @@ class Contact(Base):
     name: Mapped[str] = mapped_column(Text)
     phone: Mapped[str] = mapped_column(Text, unique=True)
     notes: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     calls: Mapped[list["Call"]] = relationship(back_populates="contact")
 
@@ -34,9 +32,7 @@ class Campaign(Base):
     goal: Mapped[str | None] = mapped_column(Text)
     script_prompt: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="draft")  # draft|running|stopped|completed
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     contacts: Mapped[list["CampaignContact"]] = relationship(
         back_populates="campaign", cascade="all, delete-orphan"

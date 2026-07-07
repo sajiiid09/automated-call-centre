@@ -60,9 +60,7 @@ async def webrtc_offer(request: Request):
 
     async def on_connection(connection):
         nonlocal answer
-        session = CallSession(
-            direction=direction, contact_id=contact_id, campaign_id=campaign_id
-        )
+        session = CallSession(direction=direction, contact_id=contact_id, campaign_id=campaign_id)
         call_id = await session.start()
         config = await session.build_config()
 

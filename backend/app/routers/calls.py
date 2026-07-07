@@ -40,6 +40,23 @@ def list_calls(
     return [_with_names(c) for c in db.scalars(stmt)]
 
 
+@router.post("/outbound", status_code=202)
+async def outbound_call(payload: dict, db: Session = Depends(get_db)):
+    """Ad-hoc single outbound PSTN call to a contact (requires Twilio)."""
+    from app.services import telephony
+
+    contact_id = payload.get("contact_id")
+    if not contact_id:
+        raise HTTPException(400, "contact_id is required")
+    from app.models import Contact
+
+    contact = db.get(Contact, uuid.UUID(str(contact_id)))
+    if contact is None:
+        raise HTTPException(404, "Contact not found")
+    sid = await telephony.originate_call(contact.phone, contact_id=contact.id)
+    return {"twilio_sid": sid}
+
+
 @router.get("/{call_id}", response_model=CallDetail)
 def get_call(call_id: uuid.UUID, db: Session = Depends(get_db)):
     call = db.get(

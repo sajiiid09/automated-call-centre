@@ -4,30 +4,38 @@
 
 ```mermaid
 flowchart LR
-    Caller((Caller / Callee))
-    Twilio[Twilio\nUK number + Media Streams]
+    Browser((Browser mic\ndemo caller))
+    Caller((Phone caller\nwhen Twilio live))
+    Twilio[Twilio adapter\nDORMANT until keys]
     Agent[Pipecat voice agent\nVAD · turn-taking · barge-in]
     DG_STT[Deepgram Nova\nSTT]
     Gemini[Gemini Flash Lite\nLLM]
     DG_TTS[Deepgram Aura\nTTS]
-    API[FastAPI backend\nREST + Twilio webhooks]
+    API[FastAPI backend\nREST + webhooks + WebRTC signalling]
     DB[(PostgreSQL)]
-    FE[Next.js dashboard]
+    FE[Next.js dashboard :3001]
 
-    Caller <-->|PSTN| Twilio
-    Twilio <-->|WebSocket audio\nMedia Streams| Agent
+    Browser <-->|WebRTC audio\nSmallWebRTC| Agent
+    Caller <-.->|PSTN| Twilio
+    Twilio <-.->|WebSocket audio\nMedia Streams| Agent
     Agent --> DG_STT --> Gemini --> DG_TTS --> Agent
-    Agent -->|call events, transcript turns| API
-    Twilio -->|status callbacks, inbound webhook| API
+    Agent -->|call rows, transcript turns| API
     API <--> DB
     FE -->|REST /api| API
 ```
 
+Two transports feed **one shared pipeline** (`agent/pipeline.py`):
+
+- **Browser web-call (live now):** dashboard call widget POSTs an SDP offer to `/api/webrtc/offer`; Pipecat's SmallWebRTC transport carries mic/speaker audio. This powers the whole demo before Twilio exists.
+- **Twilio (dormant, written, live-untested):** `/twilio/inbound` returns TwiML `<Connect><Stream>` into the `/twilio/media` WebSocket; outbound via Twilio REST origination. Activated by env vars only — see [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
+
 ## Data Flow
 
-**Inbound:** caller dials Twilio number → Twilio hits `POST /twilio/inbound` (via ngrok) → backend replies with TwiML `<Connect><Stream>` pointing at the agent's WebSocket → Pipecat pipeline runs (audio in → Deepgram STT → Gemini → Deepgram TTS → audio out) → transcript turns and call status persisted to Postgres → dashboard reads via REST.
+**Inbound (demo):** user clicks "Call agent" → WebRTC session → pipeline (audio → Deepgram STT → Gemini → Deepgram TTS → audio) → call row + transcript turns persisted → dashboard reads via REST.
 
-**Outbound:** dashboard triggers campaign → backend calls Twilio REST API to originate call with the same `<Connect><Stream>` TwiML → identical pipeline from there. One shared pipeline; only call setup differs.
+**Outbound campaigns (demo):** Start campaign → sequential dialer surfaces next pending contact → user answers as the contact in a web-call carrying the campaign script → after each call Gemini tags a disposition + summary and the queue advances; campaign completes when the queue empties.
+
+**With Twilio:** same pipeline; only call setup changes (PSTN webhook / REST origination instead of browser offer).
 
 ## Technology Choices & Rationale
 
@@ -49,6 +57,8 @@ Decisions below are **locked**. Do not swap vendors or frameworks unless the own
 
 ## Known Limitations (accepted for demo)
 
+- **Twilio adapter is live-untested** (written without an account); expect ~1 hour of verification on integration day.
+- Campaign dialing is **simulated** until Twilio: user answers each call in the browser as the contact.
 - Twilio **trial** restrictions: outbound only to verified numbers, trial announcement plays. ~$20 upgrade removes both.
 - UK number requires regulatory bundle approval (days). US number as fallback.
 - Single machine, no redundancy; a laptop sleep kills live calls.

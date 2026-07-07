@@ -16,12 +16,14 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    from app.routers import calls, campaigns, contacts, webrtc
+    from app.routers import calls, campaigns, contacts, stats, twilio_webhooks, webrtc
 
     app.include_router(contacts.router)
     app.include_router(campaigns.router)
     app.include_router(calls.router)
     app.include_router(webrtc.router)
+    app.include_router(stats.router)
+    app.include_router(twilio_webhooks.router)
 
     return app
 

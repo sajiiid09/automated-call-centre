@@ -1,6 +1,4 @@
-import uuid
-
-from app.models import Call, Campaign, CampaignContact, Contact
+from app.models import Campaign, CampaignContact, Contact
 from app.services import dialer
 
 

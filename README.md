@@ -2,13 +2,14 @@
 
 An AI-powered call center: inbound and outbound voice calls handled by an AI agent, plus a web dashboard for managing campaigns, contacts, and reviewing call transcripts and dispositions.
 
-**Status:** Phase 1 — repo scaffold, docs, and dashboard shell. See [PLAN.md](PLAN.md) for the roadmap.
+**Status:** Demo-ready without Twilio. Voice calls run in the browser (WebRTC) through the real Deepgram + Gemini pipeline; campaigns use a simulated dialer. Twilio is the only missing piece — see [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md) for integration day and [DEMO.md](DEMO.md) for the demo runbook. Roadmap: [PLAN.md](PLAN.md).
 
 ## Stack
 
 | Layer | Tech |
 |---|---|
-| Telephony | Twilio (Media Streams over WebSocket), UK number |
+| Telephony | Twilio (Media Streams over WebSocket), UK number — adapter written, dormant until keys arrive |
+| Demo voice transport | Browser web-call via WebRTC (Pipecat SmallWebRTC) |
 | Voice orchestration | [Pipecat](https://github.com/pipecat-ai/pipecat) (Python) |
 | STT / TTS | Deepgram (Nova STT, Aura TTS) |
 | LLM | Google Gemini (Flash Lite, free tier) |
@@ -43,7 +44,7 @@ uvicorn app.main:app --reload --port 8000
 # 3. Frontend (separate terminal)
 cd frontend
 npm install
-npm run dev                  # http://localhost:3000
+npm run dev                  # http://localhost:3001
 
 # 4. Tunnel for Twilio webhooks (Phase 3+)
 ngrok http 8000

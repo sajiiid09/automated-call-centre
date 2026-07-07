@@ -139,3 +139,15 @@ export const stopCampaign = (id: string) =>
 export const listCalls = () => request<Call[]>("/api/calls");
 
 export const getCall = (id: string) => request<CallDetail>(`/api/calls/${id}`);
+
+// --- Stats ---
+
+export interface Stats {
+  total_calls: number;
+  total_contacts: number;
+  active_campaigns: number;
+  avg_duration_seconds: number | null;
+  dispositions: Record<string, number>;
+}
+
+export const getStats = () => request<Stats>("/api/stats");

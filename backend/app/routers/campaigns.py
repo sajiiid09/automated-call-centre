@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import Call, Campaign, CampaignContact, Contact
-from app.schemas import CampaignContactOut, CampaignCreate, CampaignDetail, CampaignOut, CampaignUpdate
+from app.schemas import (
+    CampaignContactOut,
+    CampaignCreate,
+    CampaignDetail,
+    CampaignOut,
+    CampaignUpdate,
+)
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 

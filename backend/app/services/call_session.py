@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
-from agent.pipeline import CallConfig, build_task, default_transport_params, run_task
+from agent.pipeline import CallConfig, build_task, run_task
 from agent.prompts import build_system_prompt, greeting_for
 from app.config import settings
 from app.db import SessionLocal
