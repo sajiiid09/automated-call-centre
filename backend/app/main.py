@@ -7,7 +7,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=["http://localhost:3001"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -16,8 +16,11 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    # Phase 2+: app.include_router(contacts.router), campaigns, calls
-    # Phase 3+: twilio_webhooks router
+    from app.routers import calls, campaigns, contacts
+
+    app.include_router(contacts.router)
+    app.include_router(campaigns.router)
+    app.include_router(calls.router)
 
     return app
 
