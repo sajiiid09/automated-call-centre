@@ -16,11 +16,12 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    from app.routers import calls, campaigns, contacts
+    from app.routers import calls, campaigns, contacts, webrtc
 
     app.include_router(contacts.router)
     app.include_router(campaigns.router)
     app.include_router(calls.router)
+    app.include_router(webrtc.router)
 
     return app
 

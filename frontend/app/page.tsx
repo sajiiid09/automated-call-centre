@@ -1,5 +1,8 @@
+"use client";
+
 import { PhoneCall, Megaphone, Users, Timer } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { CallWidget } from "@/components/call-widget";
 import {
   Card,
   CardContent,
@@ -17,10 +20,14 @@ const stats = [
 export default function DashboardPage() {
   return (
     <div>
-      <PageHeader
-        title="Dashboard"
-        description="Overview of calls, campaigns, and contacts."
-      />
+      <div className="flex items-start justify-between">
+        <PageHeader
+          title="Dashboard"
+          description="Overview of calls, campaigns, and contacts."
+        />
+        {/* simulates an inbound caller ringing the agent */}
+        <CallWidget context={{ direction: "inbound" }} />
+      </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map(({ label, icon: Icon }) => (
           <Card key={label}>
