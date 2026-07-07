@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: acc-db
+    environment:
+      POSTGRES_USER: acc
+      POSTGRES_PASSWORD: acc
+      POSTGRES_DB: callcentre
+    ports:
+      - "5433:5432"   # host 5433 — 5432 commonly taken by a local Postgres
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acc -d callcentre"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db_data:
