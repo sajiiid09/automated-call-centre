@@ -2,7 +2,7 @@
 
 Each phase ships one working, demoable module. **Gate: owner reviews and approves before the next phase starts.** No big-bang build.
 
-## Phase 1 — Docs + scaffold + running frontend  ✅ current
+## Phase 1 — Docs + scaffold + running frontend  ✅ done
 
 **Goal:** Repo skeleton, all docs, dashboard shell running.
 
@@ -19,7 +19,7 @@ Each phase ships one working, demoable module. **Gate: owner reviews and approve
 
 **Also start now (external, slow):** Twilio UK regulatory bundle submission — approval takes days.
 
-## Phase 2 — Data layer + dashboard CRUD
+## Phase 2 — Data layer + dashboard CRUD  ✅ done
 
 **Goal:** Manage contacts and campaigns end-to-end in the browser.
 
@@ -29,7 +29,7 @@ Each phase ships one working, demoable module. **Gate: owner reviews and approve
 
 **Done when:** create/search/import contacts and create a campaign with selected contacts, all from the browser, persisted in Postgres.
 
-## Phase 3 — Inbound voice agent
+## Phase 3 — Voice agent (browser web-call; Twilio inbound pending keys)  ✅ done
 
 **Goal:** Phone the Twilio number, converse with the AI agent, read the transcript in the dashboard.
 
@@ -39,7 +39,7 @@ Each phase ships one working, demoable module. **Gate: owner reviews and approve
 
 **Done when:** a real inbound call holds a coherent conversation with interruption handling, and its transcript appears in the dashboard.
 
-## Phase 4 — Outbound campaigns + dispositions
+## Phase 4 — Outbound campaigns + dispositions (simulated dialer)  ✅ done
 
 **Goal:** Launch a campaign from the dashboard; agent calls contacts and records outcomes.
 
@@ -49,7 +49,7 @@ Each phase ships one working, demoable module. **Gate: owner reviews and approve
 
 **Done when:** starting a campaign dials a verified number, the agent follows the campaign script, and disposition + transcript show in the dashboard.
 
-## Phase 5 — Demo polish
+## Phase 5 — Demo polish  ✅ done
 
 **Goal:** Clean full client demo run-through.
 
@@ -58,3 +58,11 @@ Each phase ships one working, demoable module. **Gate: owner reviews and approve
 **Out of scope:** production items listed in ARCHITECTURE.md "Scaling Past the Demo".
 
 **Done when:** end-to-end demo (inbound call → outbound campaign → review transcripts/dispositions) runs clean twice in a row.
+
+## Phase 6 — Twilio integration (pending account/number)
+
+**Goal:** Real PSTN calls through the already-built pipeline.
+
+**Scope:** fill Twilio env vars, point number webhooks at ngrok, live-verify the dormant adapter (`/twilio/inbound`, `/twilio/media`, `/twilio/status`, REST origination), switch campaign dialer from simulated to real dialing. Checklist: [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
+
+**Done when:** inbound call to the Twilio number converses with the agent and a campaign dials a real (verified) phone with disposition recorded.

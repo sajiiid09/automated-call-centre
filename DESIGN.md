@@ -38,7 +38,14 @@ Campaign status: `draft → running → completed` (or `stopped`).
 | GET | `/api/calls/{id}` | Detail: metadata + full transcript turns |
 | POST | `/api/calls/outbound` | Ad-hoc single outbound call `{contact_id}` (test utility) |
 
-### Twilio webhooks (Phase 3+, not under `/api`)
+### Web-call signalling (live — demo voice transport)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/webrtc/offer` | SDP offer from the dashboard call widget; `request_data` carries `{direction, contact_id?, campaign_id?}`; spawns a pipeline bound to a new `calls` row |
+| PATCH | `/api/webrtc/offer` | Trickle ICE candidates `{pc_id, candidates[]}` |
+
+### Twilio webhooks (dormant until keys; not under `/api`)
 
 | Method | Path | Description |
 |---|---|---|

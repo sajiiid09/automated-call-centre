@@ -17,11 +17,11 @@ uvicorn app.main:app --reload --port 8000                # backend (health: /hea
 pytest                                                   # backend tests
 pytest tests/test_x.py::test_name                        # single test
 ruff check . && ruff format --check .                    # backend lint/format
-cd frontend && npm run dev                               # dashboard :3000
+cd frontend && npm run dev                               # dashboard :3001
 npm run lint && npx tsc --noEmit                         # frontend checks
 ngrok http 8000                                          # public URL for Twilio webhooks (Phase 3+)
 ```
 
 ## Architecture in one paragraph
 
-Twilio answers/originates PSTN calls and bridges audio over a Media Streams WebSocket (`/twilio/media`) into a single shared Pipecat pipeline (`agent/pipeline.py`: Deepgram Nova STT → Gemini Flash Lite → Deepgram Aura TTS) used for both inbound and outbound — only call setup differs (inbound TwiML webhook `/twilio/inbound` vs Twilio REST origination). The pipeline persists call rows and transcript turns through the FastAPI backend (`backend/app/`, routers thin, logic in `services/`) into Postgres; the Next.js dashboard consumes `/api/*`. All env vars are read only in `backend/app/config.py`. DB schema changes only via Alembic migrations (never edit applied ones). Phone numbers E.164; UUID PKs.
+One shared Pipecat pipeline (`agent/pipeline.py`: Deepgram Nova STT → Gemini Flash Lite → Deepgram Aura TTS) is fed by two transports: browser web-calls over WebRTC (`POST /api/webrtc/offer`, the demo path — dashboard call widget) and a dormant, live-untested Twilio adapter (`/twilio/inbound` TwiML → `/twilio/media` Media Streams WebSocket, REST origination for outbound) that activates when Twilio env vars are set. Campaigns run a sequential simulated dialer: the next pending contact is answered as a web-call from the campaign page, and Gemini tags a disposition after each call (`services/dialer.py`, `services/disposition.py`). The pipeline persists call rows and transcript turns through the FastAPI backend (`backend/app/`, routers thin, logic in `services/`) into Postgres; the Next.js dashboard consumes `/api/*`. All env vars are read only in `backend/app/config.py`. DB schema changes only via Alembic migrations (never edit applied ones). Phone numbers E.164; UUID PKs.

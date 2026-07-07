@@ -32,7 +32,7 @@ Roadmap and phase gates: [PLAN.md](PLAN.md). API/schema/screens: [DESIGN.md](DES
 ```bash
 docker compose up -d db
 cd backend && source .venv/bin/activate && uvicorn app.main:app --reload --port 8000
-cd frontend && npm run dev        # :3000
+cd frontend && npm run dev        # :3001
 curl localhost:8000/health
 ```
 
