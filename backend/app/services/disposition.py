@@ -48,7 +48,7 @@ def classify_call(call_id: uuid.UUID) -> None:
     try:
         client = genai.Client(api_key=settings.gemini_api_key)
         response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
+            model="gemini-3.5-flash-lite",
             contents=PROMPT.format(dispositions=DISPOSITIONS, transcript=transcript),
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
