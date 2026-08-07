@@ -17,7 +17,7 @@ uvicorn app.main:app --reload --port 8000                # backend (health: /hea
 pytest                                                   # backend tests
 pytest tests/test_x.py::test_name                        # single test
 ruff check . && ruff format --check .                    # backend lint/format
-cd frontend && npm run dev                               # dashboard :3001
+cd frontend && npm run dev                               # dashboard :3000
 npm run lint && npx tsc --noEmit                         # frontend checks
 ngrok http 8000                                          # public URL for Twilio webhooks (Phase 3+)
 ```

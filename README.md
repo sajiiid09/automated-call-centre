@@ -44,7 +44,7 @@ uvicorn app.main:app --reload --port 8000
 # 3. Frontend (separate terminal)
 cd frontend
 npm install
-npm run dev                  # http://localhost:3001
+npm run dev                  # http://localhost:3000
 
 # 4. Tunnel for Twilio webhooks (Phase 3+)
 ngrok http 8000
