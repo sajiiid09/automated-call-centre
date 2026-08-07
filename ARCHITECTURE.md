@@ -9,7 +9,7 @@ flowchart LR
     Twilio[Twilio adapter\nDORMANT until keys]
     Agent[Pipecat voice agent\nVAD · turn-taking · barge-in]
     DG_STT[Deepgram Nova\nSTT]
-    Gemini[Gemini Flash Lite\nLLM]
+    Gemini[Gemini 3.5 Flash Lite\nLLM]
     DG_TTS[Deepgram Aura\nTTS]
     API[FastAPI backend\nREST + webhooks + WebRTC signalling]
     DB[(PostgreSQL)]
@@ -29,6 +29,8 @@ Two transports feed **one shared pipeline** (`agent/pipeline.py`):
 - **Browser web-call (live now):** dashboard call widget POSTs an SDP offer to `/api/webrtc/offer`; Pipecat's SmallWebRTC transport carries mic/speaker audio. This powers the whole demo before Twilio exists.
 - **Twilio (dormant, written, live-untested):** `/twilio/inbound` returns TwiML `<Connect><Stream>` into the `/twilio/media` WebSocket; outbound via Twilio REST origination. Activated by env vars only — see [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
 
+End-to-end mechanics of a call, and how to run the system: [PROCEDURE.md](PROCEDURE.md).
+
 ## Data Flow
 
 **Inbound (demo):** user clicks "Call agent" → WebRTC session → pipeline (audio → Deepgram STT → Gemini → Deepgram TTS → audio) → call row + transcript turns persisted → dashboard reads via REST.
@@ -47,7 +49,7 @@ Decisions below are **locked**. Do not swap vendors or frameworks unless the own
 | **Pipecat** | Open-source Python framework purpose-built for voice agents: VAD, interruptions, turn-taking handled. Any STT/LLM/TTS pluggable. Self-hosted → no per-minute platform fee and a clean production path. | LiveKit Agents (great at scale, heavier infra); Vapi/Retell (demo in hours but $0.05–0.15/min platform fee + lock-in); OpenAI Realtime (lowest latency, ~$0.30+/min, vendor-locked voices). |
 | **Deepgram STT (Nova)** | Streaming-native, fast, $200 free credit covers the whole demo. | Whisper (not streaming-native); Google Chirp; AssemblyAI. |
 | **Deepgram TTS (Aura)** | Same vendor/key as STT, low latency, free credit. Voice quality is adequate for demo. | Cartesia Sonic and ElevenLabs sound better — **planned upgrade path**; swap is a one-line Pipecat service change. |
-| **Gemini Flash Lite** | Free-tier API key, fast + cheap, good enough conversational quality. | Claude Haiku (better quality, paid); GPT-4.1-mini (paid). |
+| **Gemini Flash Lite** | Free-tier API key, fast + cheap, good enough conversational quality. Currently pinned to `gemini-3.5-flash-lite` (see note below). | Claude Haiku (better quality, paid); GPT-4.1-mini (paid). |
 | **One shared pipeline** | Same agent runtime for inbound/outbound; only call setup differs. Less code, consistent behavior. Prompt/config varies per campaign. | Separate pipelines — only justified if behaviors diverge heavily. |
 | **FastAPI + Postgres** | Python matches Pipecat (one language, one repo). Postgres production-grade from day one — no SQLite migration later. | Node backend (second runtime); SQLite (migration friction); Supabase (vendor coupling, still need FastAPI for webhooks). |
 | **Next.js + shadcn/ui** | Polished dashboard fast, huge ecosystem. | Vite SPA (fine, less convention); SvelteKit; FastAPI+HTMX (weak demo polish). |
@@ -55,9 +57,20 @@ Decisions below are **locked**. Do not swap vendors or frameworks unless the own
 | **No auth** | Local-only demo. | Basic JWT login is the first thing to add if the dashboard gets a public URL. |
 | **English only** | Deepgram and Gemini are multilingual; adding a language later is configuration (STT language, TTS voice, prompt), not rearchitecture. | — |
 
+### Gemini model pinning
+
+The Gemini **model version** is not a locked vendor decision — Google retires
+Flash Lite versions for new accounts without warning, surfacing as
+`404 ... no longer available to new users`. When that happens, bump the version;
+the vendor stays Gemini. The model name is pinned in **two** places and both
+must move together:
+
+- `agent/pipeline.py` → `GEMINI_MODEL` (conversation)
+- `backend/app/services/disposition.py` → `model=` (post-call classification)
+
 ## Known Limitations (accepted for demo)
 
-- **Twilio adapter is live-untested** (written without an account); expect ~1 hour of verification on integration day.
+- **Twilio adapter is live-untested.** Credentials, phone number, and account are verified against the Twilio API, but no real PSTN call has been placed; expect ~1 hour of verification on integration day.
 - Campaign dialing is **simulated** until Twilio: user answers each call in the browser as the contact.
 - Twilio **trial** restrictions: outbound only to verified numbers, trial announcement plays. ~$20 upgrade removes both.
 - UK number requires regulatory bundle approval (days). US number as fallback.

@@ -45,13 +45,16 @@ Campaign status: `draft → running → completed` (or `stopped`).
 | POST | `/api/webrtc/offer` | SDP offer from the dashboard call widget; `request_data` carries `{direction, contact_id?, campaign_id?}`; spawns a pipeline bound to a new `calls` row |
 | PATCH | `/api/webrtc/offer` | Trickle ICE candidates `{pc_id, candidates[]}` |
 
-### Twilio webhooks (dormant until keys; not under `/api`)
+### Twilio webhooks (implemented, live-untested; not under `/api`)
 
 | Method | Path | Description |
 |---|---|---|
 | POST | `/twilio/inbound` | Answer webhook → returns TwiML `<Connect><Stream url="wss://…/twilio/media">` |
+| POST | `/twilio/outbound-answer` | TwiML fetched when an originated outbound call is answered; carries `contact_id`/`campaign_id` through to the stream URL |
 | WS | `/twilio/media` | Media Streams WebSocket → bridges into Pipecat pipeline |
 | POST | `/twilio/status` | Call status callbacks (ringing/answered/completed) → updates `calls` row |
+
+`PUBLIC_BASE_URL` must be `https://` — the TwiML rewrites it to `wss://` for the stream URL.
 
 ### Misc
 

@@ -15,8 +15,14 @@ cd backend && source .venv/bin/activate && uvicorn app.main:app --port 8000
 cd frontend && npm run dev          # http://localhost:3000
 ```
 
+First time on this machine? Run the full setup in [PROCEDURE.md](PROCEDURE.md) §8
+(Python 3.12 venv, **both** backend and agent packages, `alembic upgrade head`).
+
 Checklist: `curl localhost:8000/health` ok · dashboard loads on :3000 ·
 mic works in browser (Chrome recommended) · speakers audible.
+
+If **Call agent** fails with a 503, the keys aren't loaded — check `.env` and
+restart the backend.
 
 ### Reset demo data (optional, destructive)
 
@@ -47,6 +53,8 @@ docker compose exec db psql -U acc -d callcentre \
 
 ## Talking points / caveats
 
-- Voices: Deepgram Aura (demo tier) — upgradeable to Cartesia/ElevenLabs.
+- Voices: Deepgram Aura (`aura-2-thalia-en`, demo tier) — upgradeable to Cartesia/ElevenLabs.
 - Gemini free tier: occasional slow responses under rate limits.
 - Browser call = same agent pipeline that Twilio will feed; only transport differs.
+- If asked about real phone calls: the Twilio adapter is written and the account
+  is verified, but the first live PSTN call is still pending (Phase 6).

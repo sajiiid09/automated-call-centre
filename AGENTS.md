@@ -13,19 +13,32 @@ backend/           FastAPI app
   app/main.py      app factory + router registration
   app/config.py    pydantic-settings; all env vars read here, nowhere else
   app/db.py        engine/session
-  app/models.py    SQLAlchemy models (Phase 2+)
-  app/routers/     one file per resource (contacts, campaigns, calls, twilio_webhooks)
+  app/models.py    SQLAlchemy models
+  app/routers/     one file per resource (contacts, campaigns, calls, stats,
+                   webrtc, twilio_webhooks)
   app/services/    business logic (keep routers thin)
-agent/             Pipecat voice pipeline (Phase 3+)
+                   call_session · dialer · disposition · telephony
+agent/             Pipecat voice pipeline
   pipeline.py      STT→LLM→TTS pipeline factory (shared inbound/outbound)
+  transcript.py    frame observer → transcript turns
   prompts/         system prompt templates
 frontend/          Next.js App Router + shadcn/ui
   app/             routes: / , /campaigns , /contacts , /calls
-  components/      shared UI (sidebar, etc.)
+  components/      shared UI (sidebar, call-widget, etc.)
+  lib/api.ts       all API calls live here
 docker-compose.yml Postgres only; app processes run on host for the demo
 ```
 
-Roadmap and phase gates: [PLAN.md](PLAN.md). API/schema/screens: [DESIGN.md](DESIGN.md).
+How it all fits together: [PROCEDURE.md](PROCEDURE.md). Roadmap and phase gates: [PLAN.md](PLAN.md). API/schema/screens: [DESIGN.md](DESIGN.md).
+
+## Install
+
+```bash
+cd backend
+python3.12 -m venv .venv && source .venv/bin/activate   # 3.13+ breaks Pipecat (audioop removed)
+pip install -e ".[dev]" -e ../agent                     # both packages, or `import agent` fails
+alembic upgrade head
+```
 
 ## Run locally
 
@@ -49,8 +62,9 @@ cd frontend && npx tsc --noEmit
 
 - **Python:** ruff (lint + format), type hints on public functions, pydantic models for API I/O. Env vars only via `app/config.py`.
 - **TypeScript:** eslint + strict TS. Use shadcn/ui components before hand-rolling UI. API calls in `frontend/lib/api.ts`, not inline in components.
-- **DB:** schema changes only via Alembic migrations (Phase 2+); never edit applied migrations.
+- **DB:** schema changes only via Alembic migrations; never edit applied migrations.
 - Phone numbers stored E.164. UUIDs for PKs.
+- **Gemini model name is pinned in two files** — `agent/pipeline.py` (`GEMINI_MODEL`) and `app/services/disposition.py`. Change both together.
 - Commits: conventional-ish (`feat:`, `fix:`, `docs:`, `chore:`).
 
 ## Do not touch
