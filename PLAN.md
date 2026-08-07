@@ -59,10 +59,20 @@ Each phase ships one working, demoable module. **Gate: owner reviews and approve
 
 **Done when:** end-to-end demo (inbound call → outbound campaign → review transcripts/dispositions) runs clean twice in a row.
 
-## Phase 6 — Twilio integration (pending account/number)
+## Phase 6 — Twilio integration  🟡 in progress
 
 **Goal:** Real PSTN calls through the already-built pipeline.
 
 **Scope:** fill Twilio env vars, point number webhooks at ngrok, live-verify the dormant adapter (`/twilio/inbound`, `/twilio/media`, `/twilio/status`, REST origination), switch campaign dialer from simulated to real dialing. Checklist: [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
+
+**Progress:**
+- ✅ Twilio credentials in `.env`, verified against the API (account active, trial tier)
+- ✅ Number `+447888862925` confirmed owned, voice-capable
+- ✅ Deepgram + Gemini live-verified (STT/TTS round trip, LLM, disposition tagging)
+- ⬜ `PUBLIC_BASE_URL` / ngrok tunnel
+- ⬜ Twilio console webhooks pointed at the backend
+- ⬜ Live inbound call verified
+- ⬜ Live outbound call verified
+- ⬜ Campaign dialer switched from simulated to real origination
 
 **Done when:** inbound call to the Twilio number converses with the agent and a campaign dials a real (verified) phone with disposition recorded.
