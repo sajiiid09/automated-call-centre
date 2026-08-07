@@ -65,14 +65,22 @@ Each phase ships one working, demoable module. **Gate: owner reviews and approve
 
 **Scope:** fill Twilio env vars, point number webhooks at ngrok, live-verify the dormant adapter (`/twilio/inbound`, `/twilio/media`, `/twilio/status`, REST origination), switch campaign dialer from simulated to real dialing. Checklist: [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
 
-**Progress:**
+**Progress — code complete, live verification outstanding:**
 - ✅ Twilio credentials in `.env`, verified against the API (account active, trial tier)
 - ✅ Number `+447888862925` confirmed owned, voice-capable
 - ✅ Deepgram + Gemini live-verified (STT/TTS round trip, LLM, disposition tagging)
-- ⬜ `PUBLIC_BASE_URL` / ngrok tunnel
-- ⬜ Twilio console webhooks pointed at the backend
-- ⬜ Live inbound call verified
-- ⬜ Live outbound call verified
-- ⬜ Campaign dialer switched from simulated to real origination
+- ✅ Campaign dialer switched to real origination — background supervisor (`services/campaign_runner.py`) claims one contact at a time and places PSTN calls
+- ✅ Call row now created at origination, so unanswered calls (busy/no-answer/failed) advance the queue instead of stranding it
+- ✅ `StatusCallbackEvent` sent as repeated params — previously only `completed` was ever delivered
+- ✅ Real `from_number`/`to_number` persisted instead of the literal `web-call`
+- ✅ Fail-closed safety: `OUTBOUND_ALLOWLIST`, daily cap, start confirmation, stop hangs up the live leg
+- ✅ `X-Twilio-Signature` validation on all Twilio routes
+- ✅ Simulated browser dialing preserved — mode switches on configuration alone, so DEMO.md is unaffected
+- ⬜ `PUBLIC_BASE_URL` / ngrok tunnel *(human)*
+- ⬜ `OUTBOUND_ALLOWLIST` populated *(human)*
+- ⬜ Twilio console webhooks pointed at the backend *(human)*
+- ⬜ Live inbound / outbound / campaign calls verified *(human)*
+
+Remaining steps: [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
 
 **Done when:** inbound call to the Twilio number converses with the agent and a campaign dials a real (verified) phone with disposition recorded.

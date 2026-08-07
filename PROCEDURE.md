@@ -18,12 +18,16 @@ There are two ways audio reaches the agent:
 
 | Transport | Status | Used for |
 |---|---|---|
-| **Browser web-call (WebRTC)** | **Live and verified** | The entire demo — inbound calls and campaign calls |
-| **Twilio PSTN (Media Streams)** | Written, credentials verified, **never live-tested** | Real phone calls, once integration day happens |
+| **Browser web-call (WebRTC)** | **Live and verified** | The demo — inbound calls and simulated campaign calls |
+| **Twilio PSTN (Media Streams)** | Implemented and unit-tested, **not yet live-verified** | Real phone calls |
 
 Both feed the **same pipeline**. Only call setup differs. That is the central
 design idea: swapping transports does not change the agent, the persistence,
 or the dashboard.
+
+**Which one runs is decided by configuration, not code** (see §5). Without a
+public HTTPS URL the system stays in simulated mode and the browser demo works
+exactly as before.
 
 ---
 
@@ -31,15 +35,21 @@ or the dashboard.
 
 ```
 frontend/   Next.js 16 dashboard (:3000) — contacts, campaigns, calls, call widget
-backend/    FastAPI (:8000) — REST API, WebRTC signalling, Twilio webhooks
+backend/    FastAPI (:8000) — REST API, WebRTC signalling, Twilio webhooks, dial supervisor
 agent/      Pipecat pipeline — the actual voice agent (STT → LLM → TTS)
 Postgres    Docker container on host port 5433 — all state
 ```
 
 The backend and the agent run **in the same Python process**. `agent/` is a
 separate installable package, but the FastAPI app imports it directly
-(`app/services/call_session.py` → `agent.pipeline`). There is no separate
-worker or queue — a call is an asyncio task inside the API process.
+(`app/services/call_session.py` → `agent.pipeline`). There is no external
+worker or queue — a call is an asyncio task inside the API process, and in real
+dialing mode the campaign supervisor is another asyncio task in that same
+process (§5).
+
+> **Run a single worker.** The supervisor is one task per process; `uvicorn
+> --workers N` would start N of them. The database claim is safe under
+> concurrency, but the polling and stale-call reap would duplicate work.
 
 ---
 
@@ -133,64 +143,142 @@ This is the demo path. Follow it once and the rest of the system makes sense.
 
 ---
 
-## 5. How campaigns work (simulated dialing)
+## 5. How campaigns work
 
-The dialer in `services/dialer.py` **does not place phone calls today.** It is a
-state machine over `campaign_contacts`:
+Campaigns run in one of two modes, decided by `telephony.dialing_mode()`:
+
+| `DIALER_MODE` | Behavior |
+|---|---|
+| `auto` (default) | Real dialing **iff** Twilio credentials, a phone number, and an `https://` `PUBLIC_BASE_URL` are all present. Otherwise simulated. |
+| `simulated` | Kill switch — always browser web-calls, even with Twilio configured. |
+| `twilio` | Force real dialing. |
+
+The `https://` requirement is not pedantry: the TwiML rewrites that URL to
+`wss://` for the media stream, so an `http://` value produces silent audio with
+no error anywhere.
+
+### The shared state machine
+
+`services/dialer.py` is a state machine over `campaign_contacts`, used by both
+modes:
 
 ```
-start_campaign      status → running; any stale 'calling' rows reset to 'pending'
-next_pending_contact  first contact with status='pending'
-mark_calling        pending → calling   (when the call starts)
-advance_after_call  calling → done|failed; campaign → completed when queue empties
-stop_campaign       running → stopped   (takes effect after the current call)
+start_campaign        status → running; contacts stuck in 'calling' re-queued,
+                      but only if their call is actually over
+claim_next_contact    atomically take the next pending contact → 'calling'
+advance_after_call    calling → done|failed; campaign → completed when drained
+stop_campaign         running → stopped
 ```
+
+`claim_next_contact` locks the campaign row (`SELECT … FOR UPDATE`) and checks
+for an in-flight call inside that lock. That is what keeps dialing sequential
+and stops two supervisors racing. `advance_after_call` only acts on a contact
+still in `calling`, which makes it **idempotent** — a real call can be reported
+terminal by the status callback, the pipeline, and the stale reap.
+
+### Simulated mode
 
 The campaign page shows the next pending contact with an **"Answer as
 &lt;contact&gt;"** button. You click it and roleplay that contact in a browser
 web-call. Everything downstream — prompt injection, transcript, disposition,
-queue advance — is real. Only the PSTN leg is simulated.
+queue advance — is real. Only the PSTN leg is simulated. This is what
+[DEMO.md](DEMO.md) uses.
+
+### Real mode — the dial supervisor
+
+`services/campaign_runner.py` is the **only server-initiated actor** in the
+backend; everything else reacts to an incoming request. It starts from the
+FastAPI lifespan and, every `DIAL_POLL_SECONDS` (3), for each running campaign:
+
+1. **Reaps stale attempts** — a contact in `calling` whose call is terminal, or
+   older than `DIAL_STALE_CALL_SECONDS` (300), is force-advanced. This is what
+   makes a mid-campaign process restart self-healing: the media stream died with
+   the process, so nothing else would ever release that contact.
+2. **Claims** one contact atomically.
+3. **Checks the guardrails** (allowlist, daily cap). A blocked contact is marked
+   `failed` rather than skipped — skipping would leave the campaign unable to
+   ever reach `completed`.
+4. **Creates the `calls` row** with `status="initiated"` and the real numbers.
+5. **Originates** the call and stores the returned SID.
+
+If origination throws — a trial account rejecting an unverified number is the
+common case — the contact is failed and the queue moves on. One bad number must
+never wedge a campaign.
+
+Polling rather than chaining each call off the previous one is deliberate: a
+dropped webhook, an ngrok restart, or a process crash would break a chain
+permanently, and nothing would repair it.
 
 Dialing is strictly **sequential**: one call at a time, no retries, no
 scheduling, no answer-machine detection.
 
-**To make it dial real phones** you call
-`telephony.originate_call(contact.phone, contact_id, campaign_id)` from
-`start_campaign` / `advance_after_call`, and advance on the Twilio `completed`
-status callback instead of on web-call end. See
-[TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md) §5.
-
 ---
 
-## 6. The Twilio path (built, not yet live)
-
-Dormant code, activated by environment variables alone. `twilio_enabled()`
-returns true once `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are set;
-origination additionally requires `PUBLIC_BASE_URL`.
+## 6. The Twilio path (implemented, not yet live-verified)
 
 **Inbound:**
 ```
 caller dials the Twilio number
-  → Twilio POSTs /twilio/inbound
-  → backend returns TwiML: <Connect><Stream url="wss://<PUBLIC_BASE_URL>/twilio/media?direction=inbound"/>
+  → Twilio POSTs /twilio/inbound  (signature verified)
+  → backend returns TwiML: <Connect><Stream url="wss://…/twilio/media?direction=inbound&from_number=…"/>
   → Twilio opens the WebSocket and streams audio
   → /twilio/media reads the "start" message for streamSid/callSid,
     wraps the socket in FastAPIWebsocketTransport + TwilioFrameSerializer,
     and runs the same pipeline
 ```
+The caller's number is carried into the stream URL, so inbound rows record real
+E.164 numbers and can be matched back to a known contact.
 
-**Outbound:** `originate_call()` POSTs to the Twilio REST API with
-`Url=<PUBLIC_BASE_URL>/twilio/outbound-answer` — Twilio fetches that TwiML when
-the callee answers, which returns the same `<Connect><Stream>` pointing at
-`/twilio/media` with `direction=outbound` plus contact/campaign IDs in the query
-string.
+**Outbound:** the row is created **first**, then `originate_call()` POSTs to the
+Twilio REST API with our `call_id` threaded into both callback URLs. Twilio
+fetches `/twilio/outbound-answer` when the callee picks up, which returns the
+same `<Connect><Stream>` pointing at `/twilio/media`.
 
-**Status:** `/twilio/status` receives progress callbacks and marks
-`busy | no-answer | failed | canceled` calls appropriately.
+### Why the row is created before the call exists
 
-Note the URL scheme conversion: `PUBLIC_BASE_URL` must be `https://`, because
-`_stream_twiml()` rewrites it to `wss://`. An `http://` value produces a broken
-stream URL and silent audio.
+The `calls` row used to be created inside `/twilio/media`, which only runs when
+somebody **answers**. A call that went to busy, rang out, or failed therefore
+had no row and no SID — so its status callback matched nothing, the failure was
+dropped silently, and the campaign contact sat in `calling` forever.
+
+Now: `create_outbound_call_row` writes the row at origination
+(`status="initiated"`), and `/twilio/media` **adopts** it via `adopt_call_row`,
+which attaches the SID, flips it to `in_progress`, and restarts `started_at` so
+`duration_seconds` measures talk time rather than talk + ring.
+
+### Status callbacks own the queue
+
+| Twilio `CallStatus` | `calls.status` | Advances queue |
+|---|---|---|
+| `initiated`, `queued` | `initiated` | no |
+| `ringing` | `ringing` | no |
+| `in-progress` | left alone (media stream owns it) | no |
+| `completed` | `completed` | **yes** |
+| `busy`, `no-answer`, `canceled`, `failed` | `failed` / `no_answer` | **yes** |
+
+For a call nobody answered there is no transcript, so the disposition is written
+directly (`"Twilio reported no-answer"`) instead of spending a Gemini call to
+reach the same conclusion.
+
+On PSTN the status callback — not the pipeline ending — advances the queue,
+because it is the only signal that exists when nobody picks up. `CallSession`
+knows this via its `is_twilio` flag.
+
+Lookups are keyed on **our** `call_id` from the query string, with the SID as a
+fallback: Twilio's first callback can arrive before the REST response has even
+returned the SID to us.
+
+### Webhook authentication
+
+All four Twilio routes verify `X-Twilio-Signature` (HMAC-SHA1 over the URL plus
+sorted POST params, using the auth token). The Media Streams WebSocket carries
+no headers, so its URL includes a per-call HMAC token that only our own TwiML
+can produce. Both checks are skipped in simulated mode, so tests and the browser
+demo are unaffected.
+
+Without this, anyone who found the ngrok URL could post fake status callbacks to
+corrupt campaign state, or open the media socket and burn Deepgram and Gemini
+credit.
 
 ---
 
@@ -261,10 +349,28 @@ Health check: `curl localhost:8000/health` → `{"status":"ok"}`
 | `DEEPGRAM_API_KEY` | STT **and** TTS | `/api/webrtc/offer` returns 503 — no calls at all |
 | `GEMINI_API_KEY` | Agent replies + dispositions | same 503 |
 | `DATABASE_URL` | Everything | backend won't start |
-| `TWILIO_ACCOUNT_SID` / `_AUTH_TOKEN` / `_PHONE_NUMBER` | Real phone calls | Twilio routes stay dormant; demo unaffected |
-| `PUBLIC_BASE_URL` | Twilio webhooks (ngrok `https://` URL) | `originate_call` returns 503 |
+| `TWILIO_ACCOUNT_SID` / `_AUTH_TOKEN` / `_PHONE_NUMBER` | Real phone calls | stays in simulated mode; demo unaffected |
+| `PUBLIC_BASE_URL` | Twilio webhooks — must be `https://` | stays in simulated mode |
+| `OUTBOUND_ALLOWLIST` | **Required** for any real call | every real call is refused (fail-closed) |
+
+Optional dialing knobs, all with working defaults: `DIALER_MODE` (`auto`),
+`MAX_OUTBOUND_CALLS_PER_DAY` (20), `DIAL_POLL_SECONDS` (3),
+`DIAL_RING_TIMEOUT_SECONDS` (30), `DIAL_STALE_CALL_SECONDS` (300),
+`DIALER_SUPERVISOR_ENABLED` (true).
 
 All environment variables are read in `backend/app/config.py` and nowhere else.
+
+### Safety before you dial anything real
+
+Real calls cost money and reach real people, so the guardrails are fail-closed:
+
+- **`OUTBOUND_ALLOWLIST` must list every number that may be dialed.** Empty means
+  nothing dials, which is the default state.
+- **A daily cap** (`MAX_OUTBOUND_CALLS_PER_DAY`) bounds the blast radius of a bug.
+- **Starting a real campaign requires confirmation** — the API rejects it with 409
+  unless `confirm_real` is set, and the dashboard shows a dialog listing the numbers.
+- **Stop hangs up the live leg**, so nobody is left talking to the agent.
+- `DIALER_MODE=simulated` is a hard kill switch.
 
 ### Checks
 
@@ -318,6 +424,12 @@ docker compose exec db psql -U acc -d callcentre \
 | Call connects but no audio | Browser mic permission denied, or output device muted; Chrome is the tested browser |
 | Disposition stays empty | Gemini call failed — check backend logs; the code writes null rather than guessing |
 | Twilio call silent | `PUBLIC_BASE_URL` not `https://`, or the ngrok URL changed and webhooks now point nowhere |
+| Campaign won't dial, `dialing_mode` is `simulated` | a prerequisite is missing — check the `https://` prefix first |
+| `503 OUTBOUND_ALLOWLIST is empty` | working as designed; add the number you intend to call |
+| `503 Daily outbound cap reached` | raise `MAX_OUTBOUND_CALLS_PER_DAY` |
+| `409` on campaign start | real mode needs `confirm_real` — use the dashboard's confirm dialog |
+| Contact stuck in `calling` | the reap clears it after `DIAL_STALE_CALL_SECONDS`; check logs for the underlying failure |
+| `403` on a Twilio webhook | signature check failed — usually `PUBLIC_BASE_URL` not matching the URL Twilio actually called |
 
 Backend logs are the primary diagnostic — the pipeline logs every processor link
 at startup and every connect/disconnect per call.
@@ -326,11 +438,13 @@ at startup and every connect/disconnect per call.
 
 ## 11. Known limits
 
-- Twilio path is **live-untested**; expect fixes on integration day.
-- Campaign dialing is simulated — a human answers each call in the browser.
-- Single machine, single process. Laptop sleep kills live calls.
-- No auth on the dashboard or API.
+- Twilio path is implemented and unit-tested but **not yet live-verified** —
+  see [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
+- Campaign dialing is simulated unless Twilio is fully configured.
+- Single machine, **single worker**. Laptop sleep kills live calls.
+- No auth on the dashboard or API (the Twilio webhooks are signature-verified).
 - Sequential dialing only; no retries, scheduling, or answer-machine detection.
+  Without AMD, voicemail is reported as `completed`.
 - Transcripts only — no call audio is stored.
 - English only.
 

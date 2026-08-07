@@ -54,12 +54,20 @@ class CampaignUpdate(BaseModel):
     contact_ids: list[uuid.UUID] | None = None
 
 
+class CampaignStartRequest(BaseModel):
+    # required in real dialing mode — guards against starting the wrong campaign
+    confirm_real: bool = False
+
+
 class CampaignContactOut(ORMModel):
     contact: ContactOut
     status: str
     disposition: str | None = None
     disposition_summary: str | None = None
     call_id: uuid.UUID | None = None
+    call_status: str | None = None
+    # None in simulated mode; False when the number is not allowlisted
+    dialable: bool | None = None
 
 
 class CampaignOut(ORMModel):
@@ -71,6 +79,7 @@ class CampaignOut(ORMModel):
     created_at: datetime
     total_contacts: int = 0
     called_contacts: int = 0
+    dialing_mode: str = "simulated"  # simulated | twilio
 
 
 class CampaignDetail(CampaignOut):
@@ -78,6 +87,10 @@ class CampaignDetail(CampaignOut):
 
 
 # --- Calls ---
+
+
+class OutboundCallRequest(BaseModel):
+    contact_id: uuid.UUID
 
 
 class TranscriptTurnOut(ORMModel):
@@ -90,6 +103,7 @@ class TranscriptTurnOut(ORMModel):
 class CallOut(ORMModel):
     id: uuid.UUID
     direction: str
+    twilio_sid: str | None = None
     status: str
     disposition: str | None
     disposition_summary: str | None

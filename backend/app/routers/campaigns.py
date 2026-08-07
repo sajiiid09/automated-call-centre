@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -11,8 +12,10 @@ from app.schemas import (
     CampaignCreate,
     CampaignDetail,
     CampaignOut,
+    CampaignStartRequest,
     CampaignUpdate,
 )
+from app.services import telephony
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
@@ -38,6 +41,7 @@ def _to_out(campaign: Campaign) -> CampaignOut:
     total, called = _counts(campaign)
     out = CampaignOut.model_validate(campaign)
     out.total_contacts, out.called_contacts = total, called
+    out.dialing_mode = telephony.dialing_mode()
     return out
 
 
@@ -47,7 +51,8 @@ def _set_contacts(db: Session, campaign: Campaign, contact_ids: list[uuid.UUID])
     if missing:
         raise HTTPException(400, f"Unknown contact ids: {sorted(str(m) for m in missing)}")
     campaign.contacts = [
-        CampaignContact(campaign_id=campaign.id, contact_id=cid) for cid in contact_ids
+        CampaignContact(campaign_id=campaign.id, contact_id=cid, position=i)
+        for i, cid in enumerate(contact_ids)
     ]
 
 
@@ -85,6 +90,7 @@ def get_campaign(campaign_id: uuid.UUID, db: Session = Depends(get_db)):
             .order_by(Call.started_at.asc().nulls_first())
         )
     }
+    real = telephony.dialing_mode() == "twilio"
     rows = []
     for cc in campaign.contacts:
         row = CampaignContactOut.model_validate(cc)
@@ -93,6 +99,8 @@ def get_campaign(campaign_id: uuid.UUID, db: Session = Depends(get_db)):
             row.disposition = call.disposition
             row.disposition_summary = call.disposition_summary
             row.call_id = call.id
+            row.call_status = call.status
+        row.dialable = telephony.is_dialable(cc.contact.phone) if real else None
         rows.append(row)
     detail.contact_rows = rows
     return detail
@@ -114,18 +122,43 @@ def update_campaign(campaign_id: uuid.UUID, payload: CampaignUpdate, db: Session
 
 
 @router.post("/{campaign_id}/start", response_model=CampaignOut)
-def start_campaign(campaign_id: uuid.UUID, db: Session = Depends(get_db)):
+def start_campaign(
+    campaign_id: uuid.UUID,
+    payload: CampaignStartRequest | None = None,
+    db: Session = Depends(get_db),
+):
     from app.services import dialer
 
+    campaign = _get_or_404(db, campaign_id)
+    if telephony.dialing_mode() == "twilio" and not (payload and payload.confirm_real):
+        raise HTTPException(
+            409,
+            f"This campaign will place real phone calls to {len(campaign.contacts)} "
+            "contacts. Re-send with confirm_real=true to proceed.",
+        )
     dialer.start_campaign(db, campaign_id)
     return _to_out(_get_or_404(db, campaign_id))
 
 
 @router.post("/{campaign_id}/stop", response_model=CampaignOut)
-def stop_campaign(campaign_id: uuid.UUID, db: Session = Depends(get_db)):
+async def stop_campaign(campaign_id: uuid.UUID, db: Session = Depends(get_db)):
     from app.services import dialer
 
     dialer.stop_campaign(db, campaign_id)
+    # Stopping must also drop the leg that is live right now — leaving the
+    # agent talking to a real person after "Stop" is not acceptable.
+    live = db.scalars(
+        select(Call).where(
+            Call.campaign_id == campaign_id,
+            Call.status.in_(("initiated", "ringing", "in_progress")),
+            Call.twilio_sid.is_not(None),
+        )
+    ).all()
+    for call in live:
+        try:
+            await telephony.hangup_call(call.twilio_sid)
+        except Exception:
+            logger.exception(f"Failed to hang up call {call.id} while stopping campaign")
     return _to_out(_get_or_404(db, campaign_id))
 
 

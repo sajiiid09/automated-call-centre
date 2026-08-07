@@ -44,6 +44,8 @@ export interface ImportResult {
   errors: string[];
 }
 
+export type DialingMode = "simulated" | "twilio";
+
 export interface Campaign {
   id: string;
   name: string;
@@ -53,6 +55,8 @@ export interface Campaign {
   created_at: string;
   total_contacts: number;
   called_contacts: number;
+  /** "twilio" means starting this campaign places real phone calls. */
+  dialing_mode: DialingMode;
 }
 
 export interface CampaignContactRow {
@@ -61,6 +65,10 @@ export interface CampaignContactRow {
   disposition: string | null;
   disposition_summary: string | null;
   call_id: string | null;
+  /** live status of this contact's call: initiated | ringing | in_progress | … */
+  call_status: string | null;
+  /** null in simulated mode; false when the number is not allowlisted */
+  dialable: boolean | null;
 }
 
 export interface CampaignDetail extends Campaign {
@@ -70,6 +78,7 @@ export interface CampaignDetail extends Campaign {
 export interface Call {
   id: string;
   direction: "inbound" | "outbound";
+  twilio_sid: string | null;
   status: string;
   disposition: string | null;
   disposition_summary: string | null;
@@ -128,15 +137,28 @@ export const getCampaign = (id: string) => request<CampaignDetail>(`/api/campaig
 export const deleteCampaign = (id: string) =>
   request<void>(`/api/campaigns/${id}`, { method: "DELETE" });
 
-export const startCampaign = (id: string) =>
-  request<Campaign>(`/api/campaigns/${id}/start`, { method: "POST" });
+/** In real dialing mode the backend requires confirm_real before it will dial. */
+export const startCampaign = (id: string, opts?: { confirm_real?: boolean }) =>
+  request<Campaign>(`/api/campaigns/${id}/start`, {
+    method: "POST",
+    ...(opts ? { body: JSON.stringify(opts) } : {}),
+  });
 
 export const stopCampaign = (id: string) =>
   request<Campaign>(`/api/campaigns/${id}/stop`, { method: "POST" });
 
 // --- Calls ---
 
-export const listCalls = () => request<Call[]>("/api/calls");
+export const listCalls = (filters?: {
+  direction?: string;
+  campaign_id?: string;
+  disposition?: string;
+}) => {
+  const query = new URLSearchParams(
+    Object.entries(filters ?? {}).filter(([, v]) => v) as [string, string][],
+  ).toString();
+  return request<Call[]>(`/api/calls${query ? `?${query}` : ""}`);
+};
 
 export const getCall = (id: string) => request<CallDetail>(`/api/calls/${id}`);
 

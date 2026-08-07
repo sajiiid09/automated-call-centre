@@ -1,9 +1,20 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.services import campaign_runner
+
+    campaign_runner.start()
+    yield
+    await campaign_runner.stop()
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="AI Call Centre API")
+    app = FastAPI(title="AI Call Centre API", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,

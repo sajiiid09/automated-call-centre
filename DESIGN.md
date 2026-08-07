@@ -25,10 +25,12 @@ Base path `/api`. JSON in/out. No auth (demo). Errors: `{"detail": "..."}` with 
 | POST | `/api/campaigns` | Create `{name, goal, script_prompt, contact_ids[]}` |
 | GET | `/api/campaigns/{id}` | Detail: contacts + per-contact call status/disposition |
 | PATCH | `/api/campaigns/{id}` | Update (only while `draft`) |
-| POST | `/api/campaigns/{id}/start` | Start sequential outbound dialing |
-| POST | `/api/campaigns/{id}/stop` | Stop after current call |
+| POST | `/api/campaigns/{id}/start` | Start sequential outbound dialing. In real dialing mode requires body `{confirm_real: true}`, else **409** |
+| POST | `/api/campaigns/{id}/stop` | Stop dialing and hang up the live leg |
 
 Campaign status: `draft → running → completed` (or `stopped`).
+
+Campaign responses carry `dialing_mode` (`simulated`|`twilio`); each contact row carries `call_status` and `dialable` (`null` in simulated mode, `false` when the number is not allowlisted).
 
 ### Calls (Phase 3+)
 
@@ -45,16 +47,20 @@ Campaign status: `draft → running → completed` (or `stopped`).
 | POST | `/api/webrtc/offer` | SDP offer from the dashboard call widget; `request_data` carries `{direction, contact_id?, campaign_id?}`; spawns a pipeline bound to a new `calls` row |
 | PATCH | `/api/webrtc/offer` | Trickle ICE candidates `{pc_id, candidates[]}` |
 
-### Twilio webhooks (implemented, live-untested; not under `/api`)
+### Twilio webhooks (implemented, not yet live-verified; not under `/api`)
+
+All verify `X-Twilio-Signature` when real dialing is active.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/twilio/inbound` | Answer webhook → returns TwiML `<Connect><Stream url="wss://…/twilio/media">` |
-| POST | `/twilio/outbound-answer` | TwiML fetched when an originated outbound call is answered; carries `contact_id`/`campaign_id` through to the stream URL |
-| WS | `/twilio/media` | Media Streams WebSocket → bridges into Pipecat pipeline |
-| POST | `/twilio/status` | Call status callbacks (ringing/answered/completed) → updates `calls` row |
+| POST | `/twilio/inbound` | Answer webhook → TwiML `<Connect><Stream url="wss://…/twilio/media">`, carrying the caller's `From`/`To` |
+| POST | `/twilio/outbound-answer` | TwiML fetched when an originated call is answered; carries `call_id`/`contact_id`/`campaign_id` to the stream URL |
+| WS | `/twilio/media` | Media Streams WebSocket → bridges into Pipecat pipeline; **adopts** the row created at origination |
+| POST | `/twilio/status` | Status callbacks → update the `calls` row and advance the campaign queue on terminal states |
 
 `PUBLIC_BASE_URL` must be `https://` — the TwiML rewrites it to `wss://` for the stream URL.
+
+Outbound `calls` rows are created **at origination** (`status="initiated"`), not on answer, so busy/no-answer/failed callbacks have a row to land on and the campaign queue advances.
 
 ### Misc
 
@@ -85,6 +91,7 @@ campaign_contacts
   campaign_id   uuid FK -> campaigns
   contact_id    uuid FK -> contacts
   status        text default 'pending'        -- pending|calling|done|failed
+  position      int not null default 0        -- deterministic dial order
   PK (campaign_id, contact_id)
 
 calls
@@ -110,7 +117,7 @@ transcript_turns
   ts            timestamptz default now()
 ```
 
-Migrations: Alembic, from Phase 2. Indexes: `calls(campaign_id)`, `calls(started_at)`, `transcript_turns(call_id)`.
+Migrations: Alembic, from Phase 2. Indexes: `calls(campaign_id)`, `calls(started_at)`, `calls(campaign_id, contact_id)`, `campaign_contacts(campaign_id, position)`, `transcript_turns(call_id)`.
 
 ## Dashboard Screens
 

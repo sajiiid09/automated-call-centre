@@ -25,8 +25,11 @@ export function formatDuration(seconds: number | null): string {
 }
 
 const statusVariant: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
+  initiated: "secondary",
+  ringing: "default",
   in_progress: "default",
   completed: "outline",
+  no_answer: "destructive",
   failed: "destructive",
 };
 
@@ -73,6 +76,7 @@ export default function CallsPage() {
                 <TableHead>When</TableHead>
                 <TableHead>Direction</TableHead>
                 <TableHead>Contact</TableHead>
+                <TableHead>Number</TableHead>
                 <TableHead>Campaign</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Disposition</TableHead>
@@ -93,6 +97,10 @@ export default function CallsPage() {
                     <Badge variant="secondary">{c.direction}</Badge>
                   </TableCell>
                   <TableCell>{c.contact_name ?? "Unknown"}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {/* "web-call" for browser calls; real E.164 once Twilio dials */}
+                    {c.direction === "inbound" ? c.from_number : c.to_number}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {c.campaign_name ?? "—"}
                   </TableCell>

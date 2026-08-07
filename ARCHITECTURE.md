@@ -6,7 +6,7 @@
 flowchart LR
     Browser((Browser mic\ndemo caller))
     Caller((Phone caller\nwhen Twilio live))
-    Twilio[Twilio adapter\nDORMANT until keys]
+    Twilio[Twilio adapter\nreal dialing when configured]
     Agent[Pipecat voice agent\nVAD · turn-taking · barge-in]
     DG_STT[Deepgram Nova\nSTT]
     Gemini[Gemini 3.5 Flash Lite\nLLM]
@@ -26,8 +26,10 @@ flowchart LR
 
 Two transports feed **one shared pipeline** (`agent/pipeline.py`):
 
-- **Browser web-call (live now):** dashboard call widget POSTs an SDP offer to `/api/webrtc/offer`; Pipecat's SmallWebRTC transport carries mic/speaker audio. This powers the whole demo before Twilio exists.
-- **Twilio (dormant, written, live-untested):** `/twilio/inbound` returns TwiML `<Connect><Stream>` into the `/twilio/media` WebSocket; outbound via Twilio REST origination. Activated by env vars only — see [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
+- **Browser web-call (live now):** dashboard call widget POSTs an SDP offer to `/api/webrtc/offer`; Pipecat's SmallWebRTC transport carries mic/speaker audio. This powers the whole demo without Twilio.
+- **Twilio (implemented, not yet live-verified):** `/twilio/inbound` returns TwiML `<Connect><Stream>` into the `/twilio/media` WebSocket; outbound via Twilio REST origination, driven by a background campaign supervisor. Selected by configuration — see [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
+
+**Mode is a configuration decision, not a code path choice.** `telephony.dialing_mode()` returns `twilio` only when credentials, a number, and an `https://` public URL are all present; otherwise the system runs simulated browser dialing. That keeps the demo working everywhere and makes enabling real calls a `.env` change.
 
 End-to-end mechanics of a call, and how to run the system: [PROCEDURE.md](PROCEDURE.md).
 
@@ -70,8 +72,11 @@ must move together:
 
 ## Known Limitations (accepted for demo)
 
-- **Twilio adapter is live-untested.** Credentials, phone number, and account are verified against the Twilio API, but no real PSTN call has been placed; expect ~1 hour of verification on integration day.
-- Campaign dialing is **simulated** until Twilio: user answers each call in the browser as the contact.
+- **Twilio is not live-verified.** Credentials, phone number, and account are verified against the API and the adapter is unit-tested, but no real PSTN call has been placed; expect ~1 hour of verification.
+- Campaign dialing is **simulated** unless Twilio is fully configured: user answers each call in the browser as the contact.
+- **Single worker.** The dial supervisor runs one task per process; `uvicorn --workers N` would duplicate it. Multi-worker would need a `pg_try_advisory_lock` around the loop.
+- Real dialing is **fail-closed** behind `OUTBOUND_ALLOWLIST` plus a daily cap — deliberate friction, since the alternative default is a live public URL with valid credentials and an unreviewed contact list.
+- No answer-machine detection, so voicemail is recorded as `completed`.
 - Twilio **trial** restrictions: outbound only to verified numbers, trial announcement plays. ~$20 upgrade removes both.
 - UK number requires regulatory bundle approval (days). US number as fallback.
 - Single machine, no redundancy; a laptop sleep kills live calls.
