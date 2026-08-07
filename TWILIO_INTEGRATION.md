@@ -1,103 +1,121 @@
-# Twilio Integration Day — Checklist
+# Twilio Live Verification
 
-Everything else is built and demo-ready; this is the only remaining wiring.
-The adapter code exists but is **live-untested** (written without a Twilio
-account): expect ~1 hour of verification and small fixes.
+**The integration code is complete and tested.** What remains cannot be done
+from a keyboard: someone has to point a public URL at the backend and make real
+phone calls. This is that checklist.
+
+Everything below is a one-time setup plus ~15 test calls. Budget an hour.
 
 ## Current state
 
 | Item | Status |
 |---|---|
-| Twilio account credentials in `.env` | ✅ verified against the API — account active, **Trial** tier |
-| Phone number | ✅ `+447888862925` confirmed owned, `voice=true` |
-| Deepgram STT + TTS | ✅ live-verified (TTS→STT round trip) |
-| Gemini LLM + dispositions | ✅ live-verified |
-| `PUBLIC_BASE_URL` / ngrok | ⬜ not set — **blocks everything below** |
-| Console webhooks | ⬜ not pointed at the backend |
-| Live inbound call | ⬜ never attempted |
-| Live outbound call | ⬜ never attempted |
-| Campaign dialer → real origination | ⬜ still simulated |
+| Twilio credentials in `.env` | ✅ verified — account active, **Trial** tier |
+| Phone number | ✅ `+447888862925`, voice-capable |
+| Deepgram STT + TTS, Gemini | ✅ live-verified |
+| Adapter code (`/inbound`, `/outbound-answer`, `/status`, `/media`) | ✅ implemented, unit-tested |
+| Real campaign dialing (supervisor) | ✅ implemented, unit-tested |
+| Webhook signature validation | ✅ implemented |
+| `PUBLIC_BASE_URL` / ngrok | ⬜ **you** |
+| `OUTBOUND_ALLOWLIST` | ⬜ **you** — nothing dials until this is set |
+| Console webhooks | ⬜ **you** |
+| Live inbound / outbound / campaign calls | ⬜ **you** |
 
-Start at step 1.
+## Preflight — bound the blast radius
 
-## 0. Prerequisites
+Create a Twilio **subaccount with a low balance cap** and use its credentials.
+Worst case is then capped by the subaccount, not by your main balance.
 
-- Twilio account with a **UK number** (regulatory bundle approved) — or a US
-  number as fallback. ✅ done
-- If on trial: verify your own mobile number in Twilio console (outbound
-  calls only reach verified numbers; a trial notice plays on each call).
-  Upgrading (~$20) removes both limits. **The account is on Trial** — verify
-  your mobile before testing outbound.
+Trial tier: outbound only connects to numbers you have verified in the console
+(Verified Caller IDs), and a trial announcement plays for ~6s before the agent
+speaks. Upgrading (~$20) removes both.
 
 ## 1. Configure
 
-Credentials are already in `.env`. Only `PUBLIC_BASE_URL` is missing:
-
 ```bash
-# .env
-TWILIO_ACCOUNT_SID=ACxxxxxxxx                        # ✅ set
-TWILIO_AUTH_TOKEN=xxxxxxxx                           # ✅ set
-TWILIO_PHONE_NUMBER=+44xxxxxxxxxx                    # ✅ set
-PUBLIC_BASE_URL=https://<your-subdomain>.ngrok.app   # ⬜ TODO, no trailing slash
+ngrok http 8000     # must stay running; the free-tier URL changes on restart
 ```
 
 ```bash
-ngrok http 8000        # must stay running; update PUBLIC_BASE_URL if URL changes
+# .env — credentials are already set; these two are not
+PUBLIC_BASE_URL=https://<your-subdomain>.ngrok.app   # https, no trailing slash
+OUTBOUND_ALLOWLIST=+44xxxxxxxxxx                     # your own verified mobile
 ```
 
-Must be `https://` — `_stream_twiml()` rewrites the scheme to `wss://`, so an
-`http://` value yields a broken stream URL and silent audio.
+`PUBLIC_BASE_URL` **must** be `https://` — it is rewritten to `wss://` for the
+media stream, and an `http://` value produces silent audio with no error.
+
+`OUTBOUND_ALLOWLIST` is fail-closed: while it is empty, every real call is
+refused. This is deliberate. Add numbers only as you need them.
 
 Restart the backend after editing `.env`.
 
 ## 2. Point Twilio at the backend
 
-Twilio console → Phone Numbers → your number → Voice configuration:
+Console → Phone Numbers → your number → Voice configuration:
 
 - **A call comes in**: Webhook, `POST https://<ngrok>/twilio/inbound`
 - **Call status changes**: `POST https://<ngrok>/twilio/status`
 
-## 3. Verify inbound
-
-1. Phone the Twilio number from your mobile.
-2. Expect: agent greets you; conversation works; barge-in works.
-3. Dashboard → Calls: transcript appears (direction `inbound`).
-
-Debug: backend logs show `Twilio inbound call from …` then
-`media stream connected`. If audio is silent, check `PUBLIC_BASE_URL` uses
-`https://` (the TwiML converts it to `wss://`).
-
-## 4. Verify outbound (single call)
+## 3. Confirm the mode flipped
 
 ```bash
-curl -X POST localhost:8000/api/calls/outbound \
-  -H 'Content-Type: application/json' \
-  -d '{"contact_id": "<uuid of a contact with YOUR verified number>"}'
+curl -s localhost:8000/api/campaigns | jq -r '.[0].dialing_mode'   # → "twilio"
 ```
 
-Expect your phone to ring; answer and talk to the agent.
+If it says `simulated`, a prerequisite is missing — check the `https://` prefix
+first. This one command catches nearly every misconfiguration, including an
+ngrok URL that changed on restart.
 
-## 5. Switch campaigns from simulated to real dialing
+## 4. Verify, in order
 
-Currently campaign calls run as browser web-calls ("Answer as contact").
-To make `Start campaign` place real calls, call
-`telephony.originate_call(contact.phone, contact_id, campaign_id)` for the
-next pending contact — hook point: `start_campaign` /
-`advance_after_call` in `backend/app/services/dialer.py` (advance on the
-Twilio `completed` status callback instead of web-call end). The pipeline,
-transcripts, and dispositions already handle Twilio calls via
-`/twilio/media`.
+Each step exercises something the one before it doesn't.
 
-## Known integration risks (why live testing matters)
+1. **Inbound.** Phone the Twilio number. Expect the greeting, working barge-in,
+   and a transcript in the dashboard. Check the call row shows **real E.164
+   numbers**, not `web-call`.
+2. **Outbound, answered.**
+   ```bash
+   curl -X POST localhost:8000/api/calls/outbound \
+     -H 'Content-Type: application/json' \
+     -d '{"contact_id": "<uuid of an allowlisted contact>"}'
+   ```
+   Watch the row walk `initiated` → `ringing` → `in_progress` → `completed`,
+   with `twilio_sid` set and `duration_seconds` ≈ talk time (not talk + ring).
+3. **Outbound, unanswered.** Same call, but let it ring out. The row must reach
+   `no_answer` with `disposition="failed"`. *This is the case that used to
+   produce no row at all and hang the campaign forever.*
+4. **Blocked number.** `curl` for a contact not on the allowlist → **503**, and
+   nothing in Twilio console → Monitor → Calls.
+5. **Campaign, 2 contacts** (both your verified number). Start → confirmation
+   dialog → one phone rings. Hang up; within ~3s the second call originates.
+   Keep Monitor → Calls open and confirm **never two concurrent legs**.
+6. **Stop mid-call.** The live leg must drop immediately and no further calls
+   originate.
+7. **Restart mid-call.** `Ctrl-C` the backend while a call is live, then restart.
+   Within `DIAL_STALE_CALL_SECONDS` (default 300) the stranded contact is reaped
+   and the queue resumes on its own.
+8. **Signature validation.** From your laptop:
+   ```bash
+   curl -X POST https://<ngrok>/twilio/status -d 'CallSid=CA1&CallStatus=completed'
+   ```
+   → **403**. A 204 here means anyone on the internet can drive your campaign
+   state machine.
 
-- Twilio start-message handshake in `/twilio/media` (message order assumptions:
-  the loop reads at most 2 messages waiting for `start`).
-- 8 kHz μ-law resampling quality via `TwilioFrameSerializer` defaults.
-- ngrok free-tier URL changes on restart → webhooks break silently.
-- Trial announcement adds ~6s before the agent greeting.
+## Troubleshooting
 
-## When this is done
+| Symptom | Cause |
+|---|---|
+| `dialing_mode` stays `simulated` | `PUBLIC_BASE_URL` missing or not `https://` |
+| 503 "OUTBOUND_ALLOWLIST is empty" | working as designed — add the number |
+| 503 "Daily outbound cap reached" | raise `MAX_OUTBOUND_CALLS_PER_DAY` |
+| Call connects, silence both ways | `PUBLIC_BASE_URL` was `http://`, so the stream URL is invalid |
+| Webhooks stopped firing | ngrok restarted and issued a new URL |
+| Twilio 400 on origination | number not verified on the trial account |
+| Contact stuck in `calling` | check backend logs; the reap clears it after the stale timeout |
 
-Delete this file, mark Phase 6 complete in [PLAN.md](PLAN.md), and update the
-Twilio rows in [README.md](README.md), [ARCHITECTURE.md](ARCHITECTURE.md), and
-[PROCEDURE.md](PROCEDURE.md) §6 from "live-untested" to live.
+## When every box above is ticked
+
+Delete this file, mark Phase 6 complete in [PLAN.md](PLAN.md), and drop the
+"live-untested" wording from [README.md](README.md),
+[ARCHITECTURE.md](ARCHITECTURE.md), and [PROCEDURE.md](PROCEDURE.md) §6.

@@ -9,10 +9,10 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 
-from loguru import logger
-
 from agent.pipeline import CallConfig, build_task, run_task
 from agent.prompts import build_system_prompt, greeting_for
+from loguru import logger
+
 from app.config import settings
 from app.db import SessionLocal
 from app.models import Call, Campaign, Contact, TranscriptTurn
@@ -22,25 +22,95 @@ def _create_call_row(
     direction: str,
     contact_id: uuid.UUID | None,
     campaign_id: uuid.UUID | None,
+    from_number: str = "web-call",
+    to_number: str = "web-call",
+    status: str = "in_progress",
 ) -> uuid.UUID:
     with SessionLocal() as db:
         call = Call(
             direction=direction,
             contact_id=contact_id,
             campaign_id=campaign_id,
-            status="in_progress",
+            status=status,
             started_at=datetime.now(timezone.utc),
-            from_number="web-call",
-            to_number="web-call",
+            from_number=from_number,
+            to_number=to_number,
         )
         db.add(call)
         db.commit()
         return call.id
 
 
+def create_outbound_call_row(
+    contact_id: uuid.UUID | None,
+    campaign_id: uuid.UUID | None,
+    from_number: str,
+    to_number: str,
+) -> uuid.UUID:
+    """Row for a PSTN call that is about to be originated.
+
+    Created *before* the call exists so status callbacks for a call that is
+    never answered (busy, no-answer, failed) still have a row to land on.
+    """
+    return _create_call_row(
+        "outbound",
+        contact_id,
+        campaign_id,
+        from_number=from_number,
+        to_number=to_number,
+        status="initiated",
+    )
+
+
+def adopt_call_row(
+    call_id: uuid.UUID,
+    twilio_sid: str | None,
+    from_number: str | None = None,
+    to_number: str | None = None,
+) -> bool:
+    """Attach a live media stream to the row created at origination."""
+    with SessionLocal() as db:
+        call = db.get(Call, call_id)
+        if call is None:
+            return False
+        if twilio_sid:
+            call.twilio_sid = twilio_sid
+        if from_number:
+            call.from_number = from_number
+        if to_number:
+            call.to_number = to_number
+        call.status = "in_progress"
+        # restart the clock on answer so duration is talk time, not ring time
+        call.started_at = datetime.now(timezone.utc)
+        db.commit()
+        return True
+
+
 def _save_turn(call_id: uuid.UUID, role: str, content: str) -> None:
     with SessionLocal() as db:
         db.add(TranscriptTurn(call_id=call_id, role=role, content=content))
+        db.commit()
+
+
+def attach_twilio_sid(call_id: uuid.UUID, twilio_sid: str) -> None:
+    with SessionLocal() as db:
+        call = db.get(Call, call_id)
+        if call is not None:
+            call.twilio_sid = twilio_sid
+            db.commit()
+
+
+def mark_call_failed(call_id: uuid.UUID, summary: str) -> None:
+    """Terminal state for a call that never got off the ground."""
+    with SessionLocal() as db:
+        call = db.get(Call, call_id)
+        if call is None:
+            return
+        call.status = "failed"
+        call.disposition = "failed"
+        call.disposition_summary = summary
+        call.ended_at = datetime.now(timezone.utc)
+        call.duration_seconds = 0
         db.commit()
 
 
@@ -78,20 +148,45 @@ class CallSession:
         direction: str = "inbound",
         contact_id: uuid.UUID | None = None,
         campaign_id: uuid.UUID | None = None,
+        call_id: uuid.UUID | None = None,
+        is_twilio: bool = False,
+        from_number: str | None = None,
+        to_number: str | None = None,
+        twilio_sid: str | None = None,
     ):
         self.direction = direction
         self.contact_id = contact_id
         self.campaign_id = campaign_id
-        self.call_id: uuid.UUID | None = None
+        # set when the row already exists (outbound PSTN, created at origination)
+        self.call_id = call_id
+        self.is_twilio = is_twilio
+        self.from_number = from_number
+        self.to_number = to_number
+        self.twilio_sid = twilio_sid
 
     @property
     def is_campaign_call(self) -> bool:
         return self.campaign_id is not None and self.contact_id is not None
 
     async def start(self) -> uuid.UUID:
+        if self.call_id is not None:
+            # originated by the dialer: adopt the existing row, and don't mark
+            # the contact calling — claiming it is what let us dial at all.
+            await asyncio.to_thread(
+                adopt_call_row, self.call_id, self.twilio_sid, self.from_number, self.to_number
+            )
+            return self.call_id
+
         self.call_id = await asyncio.to_thread(
-            _create_call_row, self.direction, self.contact_id, self.campaign_id
+            _create_call_row,
+            self.direction,
+            self.contact_id,
+            self.campaign_id,
+            self.from_number or "web-call",
+            self.to_number or "web-call",
         )
+        if self.twilio_sid:
+            await asyncio.to_thread(adopt_call_row, self.call_id, self.twilio_sid)
         if self.is_campaign_call:
             await asyncio.to_thread(self._mark_calling)
         return self.call_id
@@ -120,7 +215,10 @@ class CallSession:
             from app.services.disposition import classify_call
 
             await asyncio.to_thread(classify_call, self.call_id)
-            await asyncio.to_thread(self._advance_campaign, status == "completed")
+            if not self.is_twilio:
+                # On PSTN the terminal status callback owns advancing — it is
+                # the only signal that exists for a call nobody answered.
+                await asyncio.to_thread(self._advance_campaign, status == "completed")
 
     async def build_config(self) -> CallConfig:
         contact_name, goal, script = await asyncio.to_thread(

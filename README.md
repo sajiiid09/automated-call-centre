@@ -2,7 +2,9 @@
 
 An AI-powered call center: inbound and outbound voice calls handled by an AI agent, plus a web dashboard for managing campaigns, contacts, and reviewing call transcripts and dispositions.
 
-**Status:** Demo-ready without Twilio. Voice calls run in the browser (WebRTC) through the real Deepgram + Gemini pipeline; campaigns use a simulated dialer. Deepgram (Nova STT + Aura TTS) and Gemini are live-verified end to end. Twilio credentials are valid and the adapter is written, but **no real PSTN call has been placed yet** — see [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md) for integration day.
+**Status:** Demo-ready. Voice calls run in the browser (WebRTC) through the real Deepgram + Gemini pipeline, live-verified end to end. Real Twilio PSTN dialing — inbound, outbound, and sequential campaign dialing — is **implemented and unit-tested**, and switches on by configuration alone; **no real phone call has been placed yet**, so it is not live-verified. Remaining steps: [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
+
+Real dialing is **fail-closed**: nothing is dialed until `OUTBOUND_ALLOWLIST` names the permitted numbers.
 
 **New here?** Start with [PROCEDURE.md](PROCEDURE.md) — how the system works and how to use it. Demo script: [DEMO.md](DEMO.md). Roadmap: [PLAN.md](PLAN.md).
 
@@ -10,7 +12,7 @@ An AI-powered call center: inbound and outbound voice calls handled by an AI age
 
 | Layer | Tech |
 |---|---|
-| Telephony | Twilio (Media Streams over WebSocket), UK number — adapter written, live-untested |
+| Telephony | Twilio (Media Streams over WebSocket), UK number — implemented, not yet live-verified |
 | Demo voice transport | Browser web-call via WebRTC (Pipecat SmallWebRTC) |
 | Voice orchestration | [Pipecat](https://github.com/pipecat-ai/pipecat) (Python 3.12) |
 | STT / TTS | Deepgram — Nova STT, Aura TTS (`aura-2-thalia-en`); one key covers both |
@@ -67,11 +69,16 @@ Defined in `.env` at repo root (copy from `.env.example`). Never commit `.env`.
 | `DEEPGRAM_API_KEY` | Deepgram STT **and** TTS (one key, both) | any voice call |
 | `GEMINI_API_KEY` | Agent replies + post-call dispositions | any voice call |
 | `TWILIO_ACCOUNT_SID` | Twilio account SID | real phone calls |
-| `TWILIO_AUTH_TOKEN` | Twilio auth token | real phone calls |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token + webhook signature checks | real phone calls |
 | `TWILIO_PHONE_NUMBER` | Purchased Twilio number (E.164, e.g. +44…) | real phone calls |
 | `PUBLIC_BASE_URL` | ngrok **https** URL for Twilio webhooks/TwiML | real phone calls |
+| `OUTBOUND_ALLOWLIST` | E.164 numbers that may be dialed — **fail-closed** | real phone calls |
+
+Optional: `DIALER_MODE` (`auto`/`simulated`/`twilio`), `MAX_OUTBOUND_CALLS_PER_DAY` (20), `DIAL_POLL_SECONDS`, `DIAL_RING_TIMEOUT_SECONDS`, `DIAL_STALE_CALL_SECONDS`.
 
 Without `DEEPGRAM_API_KEY` and `GEMINI_API_KEY`, `POST /api/webrtc/offer` returns **503** and no call can start. Restart the backend after editing `.env`.
+
+**Simulated vs real dialing is decided by configuration.** With `DIALER_MODE=auto` (the default), campaigns dial real phones only when Twilio credentials, a phone number, and an `https://` `PUBLIC_BASE_URL` are all present; otherwise a human answers each campaign call in the browser. The demo therefore works unchanged on any machine.
 
 ## Repo Layout
 
@@ -94,7 +101,8 @@ docs:       PROCEDURE.md · ARCHITECTURE.md · DESIGN.md · PLAN.md · AGENTS.md
 
 ## Known Demo Constraints
 
-- **Twilio adapter has never handled a real call.** Credentials verified, code written; live testing is Phase 6.
+- **Twilio has never handled a real call.** Credentials verified and the code is tested, but live verification is outstanding.
+- **Single worker only** — the campaign dial supervisor is one task per process.
 - **Twilio trial:** outbound calls only to verified numbers; calls start with a trial announcement. Upgrading to pay-as-you-go (~$20) removes both.
 - **UK numbers require a Twilio regulatory bundle** (address/ID proof) which can take days to approve — submit early; use a US number as interim fallback.
 - No dashboard auth (local demo only). English only. Single-machine deployment.

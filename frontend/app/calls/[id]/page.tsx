@@ -71,6 +71,11 @@ export default function CallDetailPage({
           {formatDuration(call.duration_seconds)}
           {call.campaign_name ? ` · Campaign: ${call.campaign_name}` : ""}
         </p>
+        <p className="mt-1 font-mono text-xs text-muted-foreground">
+          {call.from_number} → {call.to_number}
+          {/* the join key for looking this call up in the Twilio console */}
+          {call.twilio_sid ? ` · ${call.twilio_sid}` : ""}
+        </p>
       </div>
 
       {call.disposition && (

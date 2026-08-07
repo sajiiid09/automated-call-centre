@@ -5,6 +5,7 @@ pipeline task bound to a new call row."""
 import asyncio
 import uuid
 
+from agent.pipeline import default_transport_params
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 from pipecat.frames.frames import LLMRunFrame
@@ -16,7 +17,6 @@ from pipecat.transports.smallwebrtc.request_handler import (
 )
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
-from agent.pipeline import default_transport_params
 from app.config import settings
 from app.services.call_session import (
     CallSession,

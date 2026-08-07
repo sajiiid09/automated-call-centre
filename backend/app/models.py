@@ -35,7 +35,9 @@ class Campaign(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     contacts: Mapped[list["CampaignContact"]] = relationship(
-        back_populates="campaign", cascade="all, delete-orphan"
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+        order_by="CampaignContact.position",
     )
 
 
@@ -49,6 +51,7 @@ class CampaignContact(Base):
         ForeignKey("contacts.id", ondelete="CASCADE"), primary_key=True
     )
     status: Mapped[str] = mapped_column(Text, default="pending")  # pending|calling|done|failed
+    position: Mapped[int] = mapped_column(Integer, default=0)  # dial order
 
     campaign: Mapped[Campaign] = relationship(back_populates="contacts")
     contact: Mapped[Contact] = relationship()

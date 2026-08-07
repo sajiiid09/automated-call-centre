@@ -18,6 +18,7 @@ backend/           FastAPI app
                    webrtc, twilio_webhooks)
   app/services/    business logic (keep routers thin)
                    call_session · dialer · disposition · telephony
+                   campaign_runner (background dial supervisor) · twilio_auth
 agent/             Pipecat voice pipeline
   pipeline.py      STT→LLM→TTS pipeline factory (shared inbound/outbound)
   transcript.py    frame observer → transcript turns
@@ -65,6 +66,9 @@ cd frontend && npx tsc --noEmit
 - **DB:** schema changes only via Alembic migrations; never edit applied migrations.
 - Phone numbers stored E.164. UUIDs for PKs.
 - **Gemini model name is pinned in two files** — `agent/pipeline.py` (`GEMINI_MODEL`) and `app/services/disposition.py`. Change both together.
+- **Run one uvicorn worker.** `services/campaign_runner.py` starts a dial supervisor per process; N workers means N supervisors.
+- **Background tasks open their own `SessionLocal()`** — never pass a request-scoped `Depends(get_db)` session into one. Tests bind them via the `shared_session` fixture.
+- **Never let the test suite reach Twilio.** `conftest.py`'s autouse `no_real_dialing` fixture pins the mode off and replaces `telephony._post_twilio` with a landmine; keep new tests behind it.
 - Commits: conventional-ish (`feat:`, `fix:`, `docs:`, `chore:`).
 
 ## Do not touch
