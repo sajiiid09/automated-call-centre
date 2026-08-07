@@ -13,7 +13,7 @@ flowchart LR
     DG_TTS[Deepgram Aura\nTTS]
     API[FastAPI backend\nREST + webhooks + WebRTC signalling]
     DB[(PostgreSQL)]
-    FE[Next.js dashboard :3001]
+    FE[Next.js dashboard :3000]
 
     Browser <-->|WebRTC audio\nSmallWebRTC| Agent
     Caller <-.->|PSTN| Twilio

@@ -12,10 +12,10 @@ cp .env.example .env   # fill DEEPGRAM_API_KEY + GEMINI_API_KEY
 # 2. services
 docker compose up -d db
 cd backend && source .venv/bin/activate && uvicorn app.main:app --port 8000
-cd frontend && npm run dev          # http://localhost:3001
+cd frontend && npm run dev          # http://localhost:3000
 ```
 
-Checklist: `curl localhost:8000/health` ok · dashboard loads on :3001 ·
+Checklist: `curl localhost:8000/health` ok · dashboard loads on :3000 ·
 mic works in browser (Chrome recommended) · speakers audible.
 
 ### Reset demo data (optional, destructive)
