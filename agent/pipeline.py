@@ -22,7 +22,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 from agent.transcript import OnTurn, TranscriptObserver
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 DEEPGRAM_TTS_VOICE = "aura-2-thalia-en"
 
 
