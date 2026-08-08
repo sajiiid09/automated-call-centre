@@ -17,8 +17,9 @@ Real dialing is **fail-closed**: nothing is dialed until `OUTBOUND_ALLOWLIST` na
 | Voice orchestration | [Pipecat](https://github.com/pipecat-ai/pipecat) (Python 3.12) |
 | STT / TTS | Deepgram — Nova STT, Aura TTS (`aura-2-thalia-en`); one key covers both |
 | LLM | Google Gemini `gemini-3.5-flash-lite` (free tier) |
+| Knowledge base | pgvector + a self-hosted OpenAI-compatible embeddings endpoint (FAQ fast path + RAG) |
 | Backend | FastAPI + SQLAlchemy |
-| Database | PostgreSQL 16 (Docker, host port 5433) |
+| Database | PostgreSQL 16 + pgvector (Docker, host port 5433) |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 | Demo deploy | Local machine + ngrok tunnel |
 
@@ -30,7 +31,7 @@ Rationale and alternatives: [ARCHITECTURE.md](ARCHITECTURE.md). Vendor choices a
 - Node.js 20+
 - Docker + Docker Compose
 - [ngrok](https://ngrok.com/) account (free) — only for Twilio
-- API keys: Deepgram, Google AI Studio (Gemini). Twilio only for real phone calls.
+- API keys: Deepgram, Google AI Studio (Gemini). Twilio only for real phone calls. An OpenAI-compatible embeddings endpoint for the knowledge base.
 
 ## Setup
 
@@ -73,8 +74,14 @@ Defined in `.env` at repo root (copy from `.env.example`). Never commit `.env`.
 | `TWILIO_PHONE_NUMBER` | Purchased Twilio number (E.164, e.g. +44…) | real phone calls |
 | `PUBLIC_BASE_URL` | ngrok **https** URL for Twilio webhooks/TwiML | real phone calls |
 | `OUTBOUND_ALLOWLIST` | E.164 numbers that may be dialed — **fail-closed** | real phone calls |
+| `EMBEDDING_API_URL` | OpenAI-compatible `/v1/embeddings` endpoint | knowledge base |
+| `EMBEDDING_API_KEY` | Bearer token for that endpoint | knowledge base |
+| `EMBEDDING_MODEL_NAME` | Model name sent in the request body | knowledge base |
+| `EMBEDDING_DIM` | Must equal the model's output width **and** the `vector(N)` columns — the backend refuses to start otherwise | knowledge base |
 
-Optional: `DIALER_MODE` (`auto`/`simulated`/`twilio`), `MAX_OUTBOUND_CALLS_PER_DAY` (20), `DIAL_POLL_SECONDS`, `DIAL_RING_TIMEOUT_SECONDS`, `DIAL_STALE_CALL_SECONDS`.
+Optional: `DIALER_MODE` (`auto`/`simulated`/`twilio`), `MAX_OUTBOUND_CALLS_PER_DAY` (20), `DIAL_POLL_SECONDS`, `DIAL_RING_TIMEOUT_SECONDS`, `DIAL_STALE_CALL_SECONDS`, `KB_TURN_TIMEOUT_SECONDS` (0.8), `KB_MAX_UPLOAD_BYTES` (5 MB), `FAQ_THRESHOLD`, `RAG_TOP_K`, `RAG_MIN_SCORE`.
+
+Without the embedding variables the agent still takes calls — it just has no company knowledge, and answers everything with "I'll pass that to the team". Load its knowledge on the dashboard's **Knowledge** page.
 
 Without `DEEPGRAM_API_KEY` and `GEMINI_API_KEY`, `POST /api/webrtc/offer` returns **503** and no call can start. Restart the backend after editing `.env`.
 
@@ -83,8 +90,8 @@ Without `DEEPGRAM_API_KEY` and `GEMINI_API_KEY`, `POST /api/webrtc/offer` return
 ## Repo Layout
 
 ```
-backend/    FastAPI app (REST API + WebRTC signalling + Twilio webhooks)
-agent/      Pipecat voice pipeline (STT → LLM → TTS)
+backend/    FastAPI app (REST API + WebRTC signalling + Twilio webhooks + knowledge base)
+agent/      Pipecat voice pipeline (STT → LLM → TTS, with the FAQ fast path)
 frontend/   Next.js dashboard
 docs:       PROCEDURE.md · ARCHITECTURE.md · DESIGN.md · PLAN.md · AGENTS.md · DEMO.md · TWILIO_INTEGRATION.md
 ```

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Megaphone, Users, Phone } from "lucide-react";
+import { BookOpen, LayoutDashboard, Megaphone, Users, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
@@ -10,6 +10,7 @@ const links = [
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/calls", label: "Calls", icon: Phone },
+  { href: "/knowledge", label: "Knowledge", icon: BookOpen },
 ];
 
 export function Sidebar() {

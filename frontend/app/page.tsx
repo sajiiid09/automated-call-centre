@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Call, Stats, getStats, listCalls } from "@/lib/api";
+import { dispositionVariant, formatDisposition } from "@/lib/dispositions";
 
 function formatDuration(seconds: number | null): string {
   if (seconds == null) return "—";
@@ -91,8 +92,8 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             {Object.entries(stats.dispositions).map(([d, n]) => (
-              <Badge key={d} variant="secondary" className="text-sm">
-                {d}: {n}
+              <Badge key={d} variant={dispositionVariant(d)} className="text-sm">
+                {formatDisposition(d)}: {n}
               </Badge>
             ))}
           </CardContent>

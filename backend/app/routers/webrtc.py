@@ -5,10 +5,9 @@ pipeline task bound to a new call row."""
 import asyncio
 import uuid
 
-from agent.pipeline import default_transport_params
+from agent.pipeline import default_transport_params, greeting_frames
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
-from pipecat.frames.frames import LLMRunFrame
 from pipecat.transports.smallwebrtc.request_handler import (
     IceCandidate,
     SmallWebRTCPatchRequest,
@@ -72,7 +71,7 @@ async def webrtc_offer(request: Request):
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info(f"Web call {call_id}: client connected, starting agent")
-            await task.queue_frames([LLMRunFrame()])
+            await task.queue_frames(greeting_frames(config))
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):

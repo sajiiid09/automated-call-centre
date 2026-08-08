@@ -16,18 +16,22 @@ backend/           FastAPI app
   app/models.py    SQLAlchemy models
   app/routers/     one file per resource (contacts, campaigns, calls, stats,
                    webrtc, twilio_webhooks)
+  app/routers/     …also knowledge (agent profile, FAQs, documents, search)
   app/services/    business logic (keep routers thin)
                    call_session · dialer · disposition · telephony
                    campaign_runner (background dial supervisor) · twilio_auth
+                   embeddings · knowledge (retrieval) · knowledge_ingest
 agent/             Pipecat voice pipeline
   pipeline.py      STT→LLM→TTS pipeline factory (shared inbound/outbound)
+  faq_gate.py      FAQ fast path + RAG injection processor
   transcript.py    frame observer → transcript turns
   prompts/         system prompt templates
 frontend/          Next.js App Router + shadcn/ui
-  app/             routes: / , /campaigns , /contacts , /calls
+  app/             routes: / , /campaigns , /contacts , /calls , /knowledge
   components/      shared UI (sidebar, call-widget, etc.)
   lib/api.ts       all API calls live here
-docker-compose.yml Postgres only; app processes run on host for the demo
+  lib/dispositions.ts  shared disposition labels/colours
+docker-compose.yml Postgres (pgvector image) only; app processes run on host
 ```
 
 How it all fits together: [PROCEDURE.md](PROCEDURE.md). Roadmap and phase gates: [PLAN.md](PLAN.md). API/schema/screens: [DESIGN.md](DESIGN.md).
@@ -68,7 +72,9 @@ cd frontend && npx tsc --noEmit
 - **Gemini model name is pinned in two files** — `agent/pipeline.py` (`GEMINI_MODEL`) and `app/services/disposition.py`. Change both together.
 - **Run one uvicorn worker.** `services/campaign_runner.py` starts a dial supervisor per process; N workers means N supervisors.
 - **Background tasks open their own `SessionLocal()`** — never pass a request-scoped `Depends(get_db)` session into one. Tests bind them via the `shared_session` fixture.
-- **Never let the test suite reach Twilio.** `conftest.py`'s autouse `no_real_dialing` fixture pins the mode off and replaces `telephony._post_twilio` with a landmine; keep new tests behind it.
+- **Never let the test suite reach Twilio or the embeddings API.** `conftest.py`'s autouse `no_real_dialing` and `fake_embeddings` fixtures pin both off — the first replaces `telephony._post_twilio` with a landmine, the second repoints the embeddings URL at a respx mock. `.env` holds working credentials for both, so keep new tests behind them.
+- **The embedding dimension lives in three places and they must agree**: `app/models.py` `EMBEDDING_DIM` (the `vector(N)` column), the same literal in the knowledge-base migration, and `EMBEDDING_DIM` in `.env`. Startup refuses to boot if the setting and the model disagree. Changing the embedding model means a migration and a full reindex.
+- **The knowledge base is fail-open on the call path.** `knowledge.lookup_turn` and `FaqGate` swallow every error and fall through to the LLM. Keep it that way: a slow or broken KB must never stall live audio.
 - Commits: conventional-ish (`feat:`, `fix:`, `docs:`, `chore:`).
 
 ## Do not touch

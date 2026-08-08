@@ -55,6 +55,8 @@ Decisions below are **locked**. Do not swap vendors or frameworks unless the own
 | **One shared pipeline** | Same agent runtime for inbound/outbound; only call setup differs. Less code, consistent behavior. Prompt/config varies per campaign. | Separate pipelines — only justified if behaviors diverge heavily. |
 | **FastAPI + Postgres** | Python matches Pipecat (one language, one repo). Postgres production-grade from day one — no SQLite migration later. | Node backend (second runtime); SQLite (migration friction); Supabase (vendor coupling, still need FastAPI for webhooks). |
 | **Next.js + shadcn/ui** | Polished dashboard fast, huge ecosystem. | Vite SPA (fine, less convention); SvelteKit; FastAPI+HTMX (weak demo polish). |
+| **pgvector in the existing Postgres** | The knowledge base needs vector search, and the corpus is small. Reusing Postgres keeps one datastore, one backup, one migration path — a dedicated vector DB would be a second system to run for a few thousand rows. Image changed from `postgres:16-alpine` to `pgvector/pgvector:pg16`. | Pinecone/Qdrant/Weaviate (another service and another SDK); in-process numpy (no index, no persistence, per-worker RAM); Postgres full-text search (no semantic paraphrase matching, which is the whole point). |
+| **OpenAI-compatible embeddings endpoint** | Self-hosted behind the owner's own URL, so transcripts and documents never leave their infrastructure, and the interface is the de-facto standard — swapping models is a `.env` change plus a reindex. | OpenAI/Voyage/Cohere hosted embeddings (another vendor with call content); Gemini embeddings (would couple retrieval to the LLM vendor). |
 | **Local + ngrok** | Zero hosting cost, fastest iteration; Twilio just needs a public HTTPS/WSS URL. | VPS (~$6/mo, always-on); Railway/Render free tier (WebSocket + cold-start risk for live audio). |
 | **No auth** | Local-only demo. | Basic JWT login is the first thing to add if the dashboard gets a public URL. |
 | **English only** | Deepgram and Gemini are multilingual; adding a language later is configuration (STT language, TTS voice, prompt), not rearchitecture. | — |
@@ -70,6 +72,37 @@ must move together:
 - `agent/pipeline.py` → `GEMINI_MODEL` (conversation)
 - `backend/app/services/disposition.py` → `model=` (post-call classification)
 
+## Knowledge base: how a caller turn is answered
+
+```mermaid
+flowchart TD
+    STT[Caller utterance from STT] --> Gate{FaqGate}
+    Gate -->|backchannel: yes / ok / thanks| LLM
+    Gate --> Embed[Embed once, ~150ms]
+    Embed --> Search[pgvector cosine: FAQs + document chunks]
+    Search --> Score{FAQ score ≥ threshold?}
+    Score -->|yes| Speak[Speak the stored answer verbatim]
+    Score -->|no| Inject[Inject top chunks as a marked system message]
+    Inject --> LLM[Gemini]
+    LLM --> TTS
+    Speak --> TTS[Deepgram Aura]
+```
+
+The fast path is a real bypass, not a shortcut through the prompt:
+`GoogleLLMService` runs inference on `LLMContextFrame` and nothing else, so
+declining to forward that one frame skips the generation entirely. The canned
+answer goes out as a `TTSSpeakFrame`, which (via `append_to_context`) still
+lands in the LLM context as the assistant's turn — so a follow-up question is
+answered with the FAQ already in history.
+
+The same mechanism gives the agent a deterministic greeting: the opening line
+is spoken from `agent_profile.greeting_template` instead of being improvised,
+removing a full LLM round trip from time-to-first-audio.
+
+Everything on this path is **fail-open**. The lookup is capped at
+`KB_TURN_TIMEOUT_SECONDS`; on timeout, error, or caller barge-in the turn falls
+through to the LLM exactly as it would have before the knowledge base existed.
+
 ## Known Limitations (accepted for demo)
 
 - **Twilio is not live-verified.** Credentials, phone number, and account are verified against the API and the adapter is unit-tested, but no real PSTN call has been placed; expect ~1 hour of verification.
@@ -84,6 +117,9 @@ must move together:
 - Gemini free-tier rate limits (fine at demo call volume, not at scale).
 - Sequential outbound dialer — one call at a time.
 - No call recording audio storage (transcripts only).
+- **Knowledge base has no OCR.** A scanned PDF has no text layer and is rejected with an explicit error rather than indexed as empty.
+- **Embeddings are a single point of failure for retrieval.** If that endpoint is down the agent still answers, just without company knowledge — it falls back to "I'll pass that to the team".
+- **Changing embedding model requires a migration and a full reindex**, because the vector column width is fixed in the schema.
 
 ## Scaling Past the Demo
 

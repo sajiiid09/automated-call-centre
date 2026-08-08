@@ -27,5 +27,29 @@ class Settings(BaseSettings):
     dial_stale_call_seconds: int = 300
     max_outbound_calls_per_day: int = 20
 
+    # Phase 7 — knowledge base (RAG + FAQ fast path)
+    # NOTE: deliberately *not* named `embedding_model`. pydantic-settings matches
+    # env keys case-insensitively, and `.env` already carries a lowercase
+    # `embedding_model=<a URL>` line — that name would bind a URL into what
+    # reads like a model name.
+    embedding_api_url: str = ""
+    embedding_api_key: str = ""
+    embedding_model_name: str = ""
+    # Must equal app.models.EMBEDDING_DIM; the column type is DDL shape, so the
+    # model holds the literal and this only guards vectors at runtime.
+    embedding_dim: int = 1024
+    embedding_timeout_seconds: float = 10.0
+
+    # Call-path budget. The whole KB lookup is capped at this; on timeout the
+    # turn falls through to the LLM rather than stalling the audio pipeline.
+    kb_turn_timeout_seconds: float = 0.8
+    kb_max_upload_bytes: int = 5 * 1024 * 1024
+
+    # Defaults for a freshly created agent_profile row; the live values are
+    # read from that row, not from here.
+    faq_threshold: float = 0.82
+    rag_top_k: int = 4
+    rag_min_score: float = 0.25
+
 
 settings = Settings()

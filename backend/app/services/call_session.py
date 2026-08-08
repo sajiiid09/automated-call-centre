@@ -9,8 +9,9 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 
+from agent.faq_gate import TurnKnowledge
 from agent.pipeline import CallConfig, build_task, run_task
-from agent.prompts import build_system_prompt, greeting_for
+from agent.prompts import build_system_prompt, render_greeting
 from loguru import logger
 
 from app.config import settings
@@ -101,7 +102,13 @@ def attach_twilio_sid(call_id: uuid.UUID, twilio_sid: str) -> None:
 
 
 def mark_call_failed(call_id: uuid.UUID, summary: str) -> None:
-    """Terminal state for a call that never got off the ground."""
+    """Terminal state for a call that never got off the ground.
+
+    Writes "failed" for either direction. That label lives in the *outbound*
+    vocabulary (see services/disposition.py), but the two vocabularies are not
+    strictly partitioned — origination failures are direction-agnostic and the
+    classifier never runs for a call that never connected.
+    """
     with SessionLocal() as db:
         call = db.get(Call, call_id)
         if call is None:
@@ -163,6 +170,8 @@ class CallSession:
         self.from_number = from_number
         self.to_number = to_number
         self.twilio_sid = twilio_sid
+        # knowledge-base settings, loaded once in build_config()
+        self._profile = None
 
     @property
     def is_campaign_call(self) -> bool:
@@ -211,27 +220,53 @@ class CallSession:
         if self.call_id is None:
             return
         await asyncio.to_thread(_finalize_call, self.call_id, status)
-        if self.is_campaign_call:
-            from app.services.disposition import classify_call
 
-            await asyncio.to_thread(classify_call, self.call_id)
-            if not self.is_twilio:
-                # On PSTN the terminal status callback owns advancing — it is
-                # the only signal that exists for a call nobody answered.
-                await asyncio.to_thread(self._advance_campaign, status == "completed")
+        from app.services.disposition import classify_call
+
+        # Every finished call gets a disposition, not just campaign ones —
+        # inbound has no campaign_id and is exactly the traffic a CX dashboard
+        # cares about. classify_call picks its vocabulary from call.direction.
+        await asyncio.to_thread(classify_call, self.call_id)
+
+        if self.is_campaign_call and not self.is_twilio:
+            # On PSTN the terminal status callback owns advancing — it is
+            # the only signal that exists for a call nobody answered.
+            await asyncio.to_thread(self._advance_campaign, status == "completed")
+
+    async def knowledge_lookup(self, text: str) -> TurnKnowledge:
+        """What the FaqGate calls once per caller turn. Fail-open by contract."""
+        from app.services import knowledge
+
+        if self._profile is None:
+            return TurnKnowledge()
+        return await knowledge.lookup_turn(text, profile=self._profile)
 
     async def build_config(self) -> CallConfig:
+        from app.services import knowledge
+
         contact_name, goal, script = await asyncio.to_thread(
             _load_call_context, self.contact_id, self.campaign_id
         )
+        # Read once per call, not per turn — the gate must never wait on the DB
+        # for a threshold it could have cached.
+        self._profile = await asyncio.to_thread(knowledge.load_profile_snapshot)
+
         return CallConfig(
             system_prompt=build_system_prompt(
                 direction=self.direction,
                 contact_name=contact_name,
                 goal=goal,
                 script=script,
+                company_name=self._profile.company_name,
+                persona=self._profile.persona,
+                knowledge_enabled=True,
             ),
-            greeting=greeting_for(self.direction, contact_name),
+            greeting=render_greeting(
+                self._profile.greeting_template,
+                company_name=self._profile.company_name,
+                contact_name=contact_name,
+                direction=self.direction,
+            ),
             deepgram_api_key=settings.deepgram_api_key,
             gemini_api_key=settings.gemini_api_key,
         )
@@ -248,4 +283,4 @@ async def run_call_pipeline(session: CallSession, task) -> None:
 
 
 def build_session_task(transport, config: CallConfig, session: CallSession):
-    return build_task(transport, config, session.on_turn)
+    return build_task(transport, config, session.on_turn, knowledge=session.knowledge_lookup)
