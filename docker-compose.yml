@@ -1,6 +1,11 @@
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector build of Postgres 16 — the knowledge base stores embeddings in
+    # vector() columns with HNSW indexes, which stock postgres:16-alpine cannot
+    # do. Note this image is Debian/glibc while the old one was Alpine/musl:
+    # swapping it over an existing volume changes the collation library, so the
+    # volume must be recreated rather than reused (see PROCEDURE.md).
+    image: pgvector/pgvector:pg16
     container_name: acc-db
     environment:
       POSTGRES_USER: acc

@@ -30,6 +30,7 @@ import {
   startCampaign,
   stopCampaign,
 } from "@/lib/api";
+import { dispositionVariant, formatDisposition } from "@/lib/dispositions";
 
 const contactStatusVariant: Record<string, "secondary" | "default" | "outline" | "destructive"> = {
   pending: "secondary",
@@ -268,7 +269,13 @@ export default function CampaignDetailPage({
                   </Badge>
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">
-                  {row.disposition ?? "—"}
+                  {row.disposition ? (
+                    <Badge variant={dispositionVariant(row.disposition)}>
+                      {formatDisposition(row.disposition)}
+                    </Badge>
+                  ) : (
+                    "—"
+                  )}
                   {row.disposition_summary && (
                     <span className="block max-w-xs truncate text-xs">
                       {row.disposition_summary}

@@ -291,9 +291,14 @@ contacts ──┬─< campaign_contacts >─┬── campaigns
            └──────< calls >────────┘
                       │
                       └──< transcript_turns  (role: agent|caller, ordered by ts)
+
+agent_profile   (one row: company name, greeting, persona, thresholds)
+kb_documents ──< kb_chunks   (embedding vector — what the agent reasons from)
+faqs                         (embedding vector — what it reads out verbatim)
 ```
 
-- UUID primary keys; phone numbers stored E.164.
+- UUID primary keys; phone numbers stored E.164. `agent_profile` is the one
+  exception: a config singleton pinned to `id = 1` by a CHECK constraint.
 - `campaign_contacts` has a composite PK `(campaign_id, contact_id)`.
 - `calls.contact_id` is nullable — unknown inbound callers have no contact.
 - `calls.twilio_sid` is only populated on real Twilio calls.
@@ -309,7 +314,7 @@ Full column list: [DESIGN.md](DESIGN.md).
 
 ```bash
 # 1. Database
-docker compose up -d db                    # Postgres 16 on host port 5433
+docker compose up -d db                    # Postgres 16 + pgvector, host port 5433
 
 # 2. Backend + agent  (Python 3.12 — see note below)
 cd backend
@@ -328,6 +333,47 @@ cd ../frontend && npm install
 
 > **Use Python 3.12, not 3.13+.** Pipecat depends on `audioop`, which was
 > removed from the standard library in Python 3.13.
+
+> **Upgrading an existing checkout past Phase 6:** the database image changed
+> from `postgres:16-alpine` to `pgvector/pgvector:pg16`. Those are Alpine/musl
+> and Debian/glibc respectively, and starting a glibc Postgres on a musl data
+> directory changes the collation library underneath existing text indexes,
+> which can corrupt them silently. Do not swap the image in place — dump, drop
+> the volume, and restore:
+>
+> ```bash
+> docker compose exec -T db pg_dump -U acc -d callcentre --data-only > backup.sql
+> docker compose down -v                     # destroys the volume; check the dump first
+> docker compose up -d db
+> cd backend && alembic upgrade head
+> docker compose exec -T db psql -U acc -d callcentre < ../backup.sql
+> docker compose exec -T db psql -U acc -d callcentre -c "SELECT extname FROM pg_extension"
+> ```
+
+### Teaching the agent about your company
+
+The agent starts out knowing nothing — it introduces itself as "the company"
+and answers everything with "I'll pass that to the team". Fix that on
+**`/knowledge`**:
+
+1. **Agent identity** — company name and the greeting callers hear. The greeting
+   is spoken verbatim, so it is identical every call and costs no LLM round trip.
+2. **Instant answers** — your most common questions. On a close match the answer
+   is read out word for word and the LLM is skipped entirely: faster, and it
+   cannot be paraphrased into something wrong. Good for hours, pricing, address,
+   returns policy.
+3. **Documents** — PDF, TXT or MD. Chunked and embedded in the background; watch
+   the status go `pending → processing → ready`. Everything not covered by an
+   instant answer is answered from these.
+4. **Test search** — type what a caller would say and see the FAQ score against
+   the live threshold plus the document sections the agent would receive. Tune
+   `faq_threshold` here rather than by making phone calls: raise it if unrelated
+   questions are matching, lower it if paraphrases are being missed.
+
+Requires `EMBEDDING_API_URL`, `EMBEDDING_API_KEY`, `EMBEDDING_MODEL_NAME` and
+`EMBEDDING_DIM` in `.env`. `EMBEDDING_DIM` must match both the model's output
+width and the `vector(N)` columns — the backend refuses to start if it doesn't.
+Changing embedding model later means a migration plus reindexing every document.
 
 > **Install both packages.** `pip install -e .` alone gives you a backend that
 > imports `agent.pipeline` and crashes. The `-e ../agent` is not optional.

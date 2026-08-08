@@ -104,6 +104,50 @@ export interface CallDetail extends Call {
   turns: TranscriptTurn[];
 }
 
+export interface AgentProfile {
+  company_name: string;
+  /** Free text; $company_name and $contact_name are substituted. */
+  greeting_template: string;
+  persona: string | null;
+  /** Similarity a caller's question must reach to skip the LLM entirely. */
+  faq_threshold: number;
+  rag_top_k: number;
+  rag_min_score: number;
+  updated_at: string;
+}
+
+export interface Faq {
+  id: string;
+  question: string;
+  /** Spoken to the caller verbatim on a match — no LLM rewording. */
+  answer: string;
+  enabled: boolean;
+  hit_count: number;
+  created_at: string;
+  /** false while the question has no embedding; such rows never match. */
+  indexed: boolean;
+}
+
+export interface KbDocument {
+  id: string;
+  title: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  status: "pending" | "processing" | "ready" | "failed";
+  error: string | null;
+  chunk_count: number;
+  created_at: string;
+}
+
+export interface KnowledgeSearchResult {
+  faq: { id: string; question: string; answer: string; score: number } | null;
+  threshold: number;
+  /** true when this question would be answered without calling the LLM. */
+  would_bypass_llm: boolean;
+  chunks: { title: string; content: string; score: number }[];
+}
+
 // --- Contacts ---
 
 export const listContacts = (search = "") =>
@@ -173,3 +217,47 @@ export interface Stats {
 }
 
 export const getStats = () => request<Stats>("/api/stats");
+
+// --- Knowledge ---
+
+export const getAgentProfile = () => request<AgentProfile>("/api/knowledge/profile");
+
+export const updateAgentProfile = (data: Partial<Omit<AgentProfile, "updated_at">>) =>
+  request<AgentProfile>("/api/knowledge/profile", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+
+export const listFaqs = () => request<Faq[]>("/api/knowledge/faqs");
+
+export const createFaq = (data: { question: string; answer: string }) =>
+  request<Faq>("/api/knowledge/faqs", { method: "POST", body: JSON.stringify(data) });
+
+export const updateFaq = (
+  id: string,
+  data: { question?: string; answer?: string; enabled?: boolean },
+) => request<Faq>(`/api/knowledge/faqs/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+
+export const deleteFaq = (id: string) =>
+  request<void>(`/api/knowledge/faqs/${id}`, { method: "DELETE" });
+
+export const listKbDocuments = () => request<KbDocument[]>("/api/knowledge/documents");
+
+/** Returns immediately with status "pending"; poll the list until "ready". */
+export const uploadKbDocument = (file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  return request<KbDocument>("/api/knowledge/documents", { method: "POST", body: form });
+};
+
+export const reindexKbDocument = (id: string) =>
+  request<KbDocument>(`/api/knowledge/documents/${id}/reindex`, { method: "POST" });
+
+export const deleteKbDocument = (id: string) =>
+  request<void>(`/api/knowledge/documents/${id}`, { method: "DELETE" });
+
+export const searchKnowledge = (query: string, top_k?: number) =>
+  request<KnowledgeSearchResult>("/api/knowledge/search", {
+    method: "POST",
+    body: JSON.stringify({ query, top_k }),
+  });

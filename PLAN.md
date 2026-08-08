@@ -84,3 +84,28 @@ Each phase ships one working, demoable module. **Gate: owner reviews and approve
 Remaining steps: [TWILIO_INTEGRATION.md](TWILIO_INTEGRATION.md).
 
 **Done when:** inbound call to the Twilio number converses with the agent and a campaign dials a real (verified) phone with disposition recorded.
+
+---
+
+## Phase 7 — Knowledge base (inbound CX)  🟡 code complete
+
+**Goal:** The agent knows who it works for and can answer real company questions — common ones instantly, the rest from indexed documents.
+
+**Scope:** pgvector-backed knowledge base, FAQ fast path that bypasses the LLM, RAG over uploaded documents, a deterministic greeting, dashboard `/knowledge`, and inbound dispositions.
+
+**Progress:**
+- ✅ Postgres image swapped to `pgvector/pgvector:pg16`; volume recreated (it was empty)
+- ✅ Schema: `agent_profile`, `kb_documents`, `kb_chunks`, `faqs` + HNSW cosine indexes (migration `c4a91e6b7d02`)
+- ✅ Async embeddings client against the OpenAI-compatible endpoint — batching, index re-sorting, dimension validation, no retry on the call path
+- ✅ Ingestion: PDF/TXT/MD → paragraph-greedy chunks with overlap → embedded in a background task, `pending → processing → ready|failed`
+- ✅ Retrieval: one embedding serves both the FAQ and chunk queries; backchannel short-circuit; per-process vector cache; hard `KB_TURN_TIMEOUT_SECONDS` budget, fail-open
+- ✅ `agent/faq_gate.py` — on a match the stored answer is spoken verbatim and the `LLMContextFrame` is dropped, which bypasses Gemini entirely; on a miss the top chunks are injected as a marked system message. Barge-in guarded by an epoch counter
+- ✅ Deterministic greeting from `agent_profile.greeting_template` — `CallConfig.greeting` was dead code and is now the actual first utterance, saving a full LLM round trip
+- ✅ Inbound dispositions: `finish()` classifies every call, vocabulary branches on direction; campaign advancement unchanged
+- ✅ Dashboard `/knowledge` (identity, FAQs, documents, test search) + shared disposition badges
+- ✅ 138 backend tests green, including a machine-checkable proof that a hit emits one `TTSSpeakFrame` and zero `LLMContextFrame`
+- ⬜ `EMBEDDING_API_KEY` / `EMBEDDING_MODEL_NAME` / `EMBEDDING_DIM` in `.env` *(human)*
+- ⬜ End-to-end verification against the real embeddings endpoint *(human + agent)*
+- ⬜ Company content loaded: FAQs and documents *(human)*
+
+**Done when:** a browser web-call greets by company name, answers a seeded FAQ verbatim with no Gemini generation in the logs, answers a document-only question from retrieved text, and lands an inbound disposition.

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { CallDetail, getCall } from "@/lib/api";
+import { dispositionVariant, formatDisposition } from "@/lib/dispositions";
 
 function formatDuration(seconds: number | null): string {
   if (seconds == null) return "—";
@@ -84,7 +85,9 @@ export default function CallDetailPage({
             <CardTitle className="text-sm">Disposition</CardTitle>
           </CardHeader>
           <CardContent>
-            <Badge className="mb-2">{call.disposition}</Badge>
+            <Badge variant={dispositionVariant(call.disposition)} className="mb-2">
+              {formatDisposition(call.disposition)}
+            </Badge>
             {call.disposition_summary && (
               <p className="text-sm text-muted-foreground">
                 {call.disposition_summary}

@@ -1,3 +1,13 @@
-from agent.prompts.base import build_system_prompt, greeting_for
+from agent.prompts.base import (
+    DEFAULT_INBOUND_GREETING,
+    build_system_prompt,
+    greeting_for,
+    render_greeting,
+)
 
-__all__ = ["build_system_prompt", "greeting_for"]
+__all__ = [
+    "DEFAULT_INBOUND_GREETING",
+    "build_system_prompt",
+    "greeting_for",
+    "render_greeting",
+]

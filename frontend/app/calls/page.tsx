@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Call, listCalls } from "@/lib/api";
+import { dispositionVariant, formatDisposition } from "@/lib/dispositions";
 
 export function formatDuration(seconds: number | null): string {
   if (seconds == null) return "—";
@@ -109,8 +110,14 @@ export default function CallsPage() {
                       {c.status}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {c.disposition ?? "—"}
+                  <TableCell className="text-sm">
+                    {c.disposition ? (
+                      <Badge variant={dispositionVariant(c.disposition)}>
+                        {formatDisposition(c.disposition)}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell>{formatDuration(c.duration_seconds)}</TableCell>
                 </TableRow>

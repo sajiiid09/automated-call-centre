@@ -62,6 +62,25 @@ All verify `X-Twilio-Signature` when real dialing is active.
 
 Outbound `calls` rows are created **at origination** (`status="initiated"`), not on answer, so busy/no-answer/failed callbacks have a row to land on and the campaign queue advances.
 
+### Knowledge base (Phase 7)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/knowledge/profile` | Agent identity + retrieval settings; creates the singleton on first read |
+| PATCH | `/api/knowledge/profile` | Update company name, greeting, persona, thresholds |
+| GET | `/api/knowledge/faqs` | List, with `indexed` and `hit_count` |
+| POST | `/api/knowledge/faqs` | 201; embeds the question inline |
+| PATCH | `/api/knowledge/faqs/{id}` | Re-embeds only when `question` changes |
+| DELETE | `/api/knowledge/faqs/{id}` | 204 |
+| GET | `/api/knowledge/documents` | List with indexing status — poll this after upload |
+| POST | `/api/knowledge/documents` | 202; multipart `file` (.pdf/.txt/.md), indexes in the background |
+| POST | `/api/knowledge/documents/{id}/reindex` | 202; idempotent, re-chunks stored text |
+| DELETE | `/api/knowledge/documents/{id}` | 204; chunks cascade |
+| POST | `/api/knowledge/search` | `{query, top_k?}` → top FAQ **with its raw score and the active threshold**, plus matching document sections |
+
+`POST /search` deliberately returns the best FAQ even below threshold, so
+near-misses are visible and `faq_threshold` can be tuned without a phone call.
+
 ### Misc
 
 | Method | Path | Description |
@@ -103,7 +122,10 @@ calls
   from_number   text
   to_number     text
   status        text                          -- initiated|ringing|in_progress|completed|failed|no_answer
-  disposition   text                          -- interested|not_interested|callback|voicemail|failed (Phase 4)
+  -- vocabulary depends on direction (Phase 7):
+  --   outbound: interested|not_interested|callback|voicemail|failed
+  --   inbound:  resolved|needs_followup|complaint|enquiry|abandoned
+  disposition   text
   disposition_summary text                    -- LLM one-liner
   started_at    timestamptz
   ended_at      timestamptz
@@ -115,17 +137,64 @@ transcript_turns
   role          text not null                 -- agent|caller
   content       text not null
   ts            timestamptz default now()
+
+-- Knowledge base (Phase 7). Requires the `vector` extension.
+
+agent_profile                                 -- exactly one row, CHECK (id = 1)
+  id                int PK default 1
+  company_name      text not null
+  greeting_template text not null             -- $company_name / $contact_name
+  persona           text                      -- appended to the system prompt
+  faq_threshold     double precision not null default 0.82
+  rag_top_k         int not null default 4
+  rag_min_score     double precision not null default 0.25
+  updated_at        timestamptz
+
+kb_documents
+  id            uuid PK
+  title         text not null
+  filename      text not null
+  content_type  text not null
+  size_bytes    int not null default 0
+  status        text not null default 'pending' -- pending|processing|ready|failed
+  error         text
+  chunk_count   int not null default 0
+  content       text                          -- extracted text; reindex source
+  created_at    timestamptz
+  updated_at    timestamptz
+
+kb_chunks
+  id            uuid PK
+  document_id   uuid FK -> kb_documents ON DELETE CASCADE
+  ordinal       int not null
+  content       text not null
+  embedding     vector(1024) not null
+  created_at    timestamptz
+  UNIQUE (document_id, ordinal)
+
+faqs
+  id            uuid PK
+  question      text not null                 -- the embedded side
+  answer        text not null                 -- spoken to the caller verbatim
+  enabled       boolean not null default true
+  embedding     vector(1024)                  -- null = not indexed, never matches
+  hit_count     int not null default 0
+  created_at    timestamptz
+  updated_at    timestamptz
 ```
 
-Migrations: Alembic, from Phase 2. Indexes: `calls(campaign_id)`, `calls(started_at)`, `calls(campaign_id, contact_id)`, `campaign_contacts(campaign_id, position)`, `transcript_turns(call_id)`.
+Migrations: Alembic, from Phase 2. Indexes: `calls(campaign_id)`, `calls(started_at)`, `calls(campaign_id, contact_id)`, `campaign_contacts(campaign_id, position)`, `transcript_turns(call_id)`, `kb_chunks(document_id)`, plus HNSW cosine indexes on `kb_chunks(embedding)` and `faqs(embedding)`.
+
+The `vector(N)` width is fixed by the schema. It appears as a literal in `app/models.py` (`EMBEDDING_DIM`) and in the knowledge-base migration, and must equal `EMBEDDING_DIM` in `.env` — the app refuses to start otherwise. Changing embedding model means a migration and a full reindex.
 
 ## Dashboard Screens
 
-Layout: fixed sidebar nav (Dashboard, Campaigns, Contacts, Calls) + main content. shadcn/ui components.
+Layout: fixed sidebar nav (Dashboard, Campaigns, Contacts, Calls, Knowledge) + main content. shadcn/ui components.
 
 1. **Dashboard** (`/`) — stat cards (total calls, active campaign, dispositions donut — Phase 5; empty states in Phase 1), recent calls list.
 2. **Contacts** (`/contacts`) — table with search, Add Contact dialog, Import CSV button, row → contact detail with call history.
 3. **Campaigns** (`/campaigns`) — list with status badge + progress (e.g. 12/40 called). New Campaign form: name, goal, script prompt, contact multi-select. Detail (`/campaigns/[id]`): contact list with per-contact status/disposition, Start/Stop buttons.
 4. **Calls** (`/calls`) — filterable log table (direction, disposition, duration). Row → call detail (`/calls/[id]`): metadata header + chat-style transcript (agent/caller bubbles) + disposition.
+5. **Knowledge** (`/knowledge`, Phase 7) — four stacked cards: **Agent identity** (company name, greeting template, standing instructions, FAQ match threshold); **Instant answers** (FAQ table with enable toggle and hit count, add dialog); **Documents** (upload PDF/TXT/MD, status badge polling `pending → processing → ready`, section count, reindex/delete); **Test search** (type a caller question, see the top FAQ with its score against the live threshold and the document sections the agent would be given). Test search is how the threshold gets tuned without placing a call.
 
 Phase 1 ships all four routes as placeholder pages with correct nav and empty-state cards.

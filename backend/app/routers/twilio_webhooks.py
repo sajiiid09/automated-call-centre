@@ -15,11 +15,10 @@ import uuid
 from urllib.parse import urlencode
 from xml.sax.saxutils import escape
 
-from agent.pipeline import default_transport_params
+from agent.pipeline import default_transport_params, greeting_frames
 from fastapi import APIRouter, Depends, Request, WebSocket
 from fastapi.responses import Response
 from loguru import logger
-from pipecat.frames.frames import LLMRunFrame
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
@@ -37,6 +36,7 @@ from app.services.call_session import (
     build_session_task,
     run_call_pipeline,
 )
+from app.services.disposition import NO_CONVERSATION
 from app.services.twilio_auth import (
     stream_token,
     verify_twilio_request,
@@ -158,8 +158,10 @@ async def status_callback(request: Request, db: Session = Depends(get_db)) -> Re
         call.status = new_status
     if not answered:
         # never picked up: no transcript to classify, so label it directly
-        # rather than spending a Gemini call to say the same thing
-        call.disposition = "failed"
+        # rather than spending a Gemini call to say the same thing. The label
+        # is direction-aware because the two vocabularies differ — see
+        # services/disposition.py.
+        call.disposition = NO_CONVERSATION.get(call.direction, "failed")
         call.disposition_summary = f"Twilio reported {call_status}"
     if call.duration_seconds is None:
         duration = form.get("CallDuration")
@@ -245,7 +247,7 @@ async def media_stream(websocket: WebSocket):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Twilio call {call_id}: media stream connected")
-        await task.queue_frames([LLMRunFrame()])
+        await task.queue_frames(greeting_frames(config))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

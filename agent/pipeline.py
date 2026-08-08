@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import Frame, LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -20,6 +21,7 @@ from pipecat.services.deepgram.tts import DeepgramTTSService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
+from agent.faq_gate import FaqGate, KnowledgeLookup
 from agent.transcript import OnTurn, TranscriptObserver
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -46,6 +48,8 @@ def build_task(
     transport: BaseTransport,
     config: CallConfig,
     on_turn: OnTurn,
+    *,
+    knowledge: KnowledgeLookup | None = None,
 ) -> PipelineTask:
     stt = DeepgramSTTService(api_key=config.deepgram_api_key)
     tts = DeepgramTTSService(
@@ -57,13 +61,10 @@ def build_task(
         settings=GoogleLLMService.Settings(model=GEMINI_MODEL),
     )
 
-    context = LLMContext(
-        messages=[
-            {"role": "system", "content": config.system_prompt},
-            # seed so the agent speaks first
-            {"role": "user", "content": "Please greet me now."},
-        ]
-    )
+    # System message only. The agent speaks first by being handed its greeting
+    # as a TTSSpeakFrame on connect (see the transports' on_client_connected),
+    # not by being prompted into improvising one.
+    context = LLMContext(messages=[{"role": "system", "content": config.system_prompt}])
     aggregators = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
@@ -71,6 +72,9 @@ def build_task(
             transport.input(),
             stt,
             aggregators.user(),
+            # Downstream of where the caller's turn is committed to the context,
+            # upstream of the only consumer of the resulting context frame.
+            FaqGate(knowledge),
             llm,
             tts,
             transport.output(),
@@ -86,6 +90,23 @@ def build_task(
         ),
         observers=[TranscriptObserver(on_turn)],
     )
+
+
+def greeting_frames(config: CallConfig) -> list[Frame]:
+    """Frames that make the agent speak first, for on_client_connected.
+
+    A TTSSpeakFrame is spoken verbatim, so the opening line is exactly what the
+    operator wrote on /knowledge and costs no LLM round trip. It still lands in
+    the LLM context as the assistant's first message (append_to_context) and in
+    the transcript, so the conversation continues normally. Falls back to
+    prompting the LLM only if there is no greeting to speak.
+
+    Both transports must use this — if one greets and the other doesn't, that
+    transport opens on silence.
+    """
+    if config.greeting and config.greeting.strip():
+        return [TTSSpeakFrame(config.greeting.strip())]
+    return [LLMRunFrame()]
 
 
 async def run_task(

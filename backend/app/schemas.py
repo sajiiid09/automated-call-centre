@@ -120,3 +120,87 @@ class CallOut(ORMModel):
 
 class CallDetail(CallOut):
     turns: list[TranscriptTurnOut] = []
+
+
+# --- Knowledge ---
+
+
+class AgentProfileOut(ORMModel):
+    company_name: str
+    greeting_template: str
+    persona: str | None
+    faq_threshold: float
+    rag_top_k: int
+    rag_min_score: float
+    updated_at: datetime
+
+
+class AgentProfileUpdate(BaseModel):
+    company_name: str | None = Field(default=None, min_length=1, max_length=120)
+    greeting_template: str | None = Field(default=None, max_length=600)
+    persona: str | None = Field(default=None, max_length=4000)
+    faq_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    rag_top_k: int | None = Field(default=None, ge=1, le=20)
+    rag_min_score: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class FaqCreate(BaseModel):
+    question: str = Field(min_length=3, max_length=500)
+    # spoken to the caller verbatim by TTS, so keep it short and speakable
+    answer: str = Field(min_length=1, max_length=600)
+    enabled: bool = True
+
+
+class FaqUpdate(BaseModel):
+    question: str | None = Field(default=None, min_length=3, max_length=500)
+    answer: str | None = Field(default=None, min_length=1, max_length=600)
+    enabled: bool | None = None
+
+
+class FaqOut(ORMModel):
+    id: uuid.UUID
+    question: str
+    answer: str
+    enabled: bool
+    hit_count: int
+    created_at: datetime
+    # False until the question has been embedded; such rows never match
+    indexed: bool = False
+
+
+class KbDocumentOut(ORMModel):
+    id: uuid.UUID
+    title: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    status: str  # pending | processing | ready | failed
+    error: str | None
+    chunk_count: int
+    created_at: datetime
+
+
+class KnowledgeSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=1000)
+    top_k: int | None = Field(default=None, ge=1, le=20)
+
+
+class FaqMatchOut(BaseModel):
+    id: uuid.UUID
+    question: str
+    answer: str
+    score: float
+
+
+class ChunkHitOut(BaseModel):
+    title: str
+    content: str
+    score: float
+
+
+class KnowledgeSearchResponse(BaseModel):
+    # the top FAQ regardless of threshold, so near-misses are visible
+    faq: FaqMatchOut | None = None
+    threshold: float
+    would_bypass_llm: bool
+    chunks: list[ChunkHitOut] = []
