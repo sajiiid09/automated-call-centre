@@ -16,5 +16,8 @@ frontend/out/
 *.tsbuildinfo
 frontend/next-env.d.ts
 
+# Local dev scratch (scripts/dev.sh writes the tunnel log here)
+.dev/
+
 # Misc
 .DS_Store
