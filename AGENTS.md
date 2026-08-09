@@ -48,6 +48,12 @@ alembic upgrade head
 ## Run locally
 
 ```bash
+./scripts/dev.sh      # everything in tmux + tunnel + Twilio rewiring; ./scripts/stop.sh to stop
+```
+
+Or by hand:
+
+```bash
 docker compose up -d db
 cd backend && source .venv/bin/activate && uvicorn app.main:app --reload --port 8000
 cd frontend && npm run dev        # :3000

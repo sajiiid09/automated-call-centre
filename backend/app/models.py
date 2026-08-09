@@ -30,7 +30,7 @@ def _uuid_pk() -> Mapped[uuid.UUID]:
 # schema and the create_all-built test schema drift apart the moment someone
 # edits .env. The migration hardcodes the same number, and app startup asserts
 # settings.embedding_dim agrees — changing models requires a migration.
-EMBEDDING_DIM = 1024
+EMBEDDING_DIM = 768
 
 
 class Contact(Base):
