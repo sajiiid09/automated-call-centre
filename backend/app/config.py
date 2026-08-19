@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     embedding_model_name: str = ""
     # Must equal app.models.EMBEDDING_DIM; the column type is DDL shape, so the
     # model holds the literal and this only guards vectors at runtime.
-    embedding_dim: int = 1024
+    embedding_dim: int = 768
     embedding_timeout_seconds: float = 10.0
 
     # Call-path budget. The whole KB lookup is capped at this; on timeout the

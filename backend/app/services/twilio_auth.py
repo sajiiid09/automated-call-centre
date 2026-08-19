@@ -13,7 +13,9 @@ import base64
 import hashlib
 import hmac
 
-from fastapi import HTTPException, Request, WebSocket
+from collections.abc import Mapping
+
+from fastapi import HTTPException, Request
 
 from app.config import settings
 from app.services.telephony import dialing_mode
@@ -44,16 +46,19 @@ async def verify_twilio_request(request: Request) -> None:
         raise HTTPException(403, "Invalid Twilio signature")
 
 
-def verify_twilio_websocket(websocket: WebSocket) -> bool:
-    """Media Streams sends no signature header, so authenticate the URL itself.
+def verify_twilio_stream(params: Mapping[str, str]) -> bool:
+    """Media Streams sends no signature header, so authenticate the params.
 
-    The stream URL carries a token derived from the call id; only our own
-    TwiML (built with the auth token) can produce a valid one.
+    The context carries a token derived from the call id; only our own TwiML
+    (built with the auth token) can produce a valid one. Twilio rejects a
+    Stream URL with a query string, so the token arrives as a <Parameter> in
+    the start message rather than in the handshake URL — which means this runs
+    after accept(), not as a handshake gate.
     """
     if dialing_mode() != "twilio":
         return True
-    call_id = websocket.query_params.get("call_id", "")
-    token = websocket.query_params.get("token", "")
+    call_id = params.get("call_id", "")
+    token = params.get("token", "")
     return bool(token) and hmac.compare_digest(token, stream_token(call_id))
 
 
