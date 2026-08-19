@@ -11,11 +11,14 @@ def test_inbound_returns_stream_twiml(client, monkeypatch):
     assert resp.headers["content-type"].startswith("application/xml")
     body = resp.text
     assert "<Connect>" in body
-    assert 'url="wss://example.ngrok.app/twilio/media?' in body
-    assert "direction=inbound" in body
+    # no query string: Twilio refuses the handshake on a <Stream> URL that has
+    # one, and the call drops with error 31920
+    assert 'url="wss://example.ngrok.app/twilio/media"' in body
+    assert "?" not in body.split("<Stream")[1].split(">")[0]
+    assert '<Parameter name="direction" value="inbound" />' in body
     # real numbers must reach the call row instead of the literal "web-call"
-    assert "from_number=%2B447700900000" in body
-    assert "to_number=%2B447888862925" in body
+    assert '<Parameter name="from_number" value="+447700900000" />' in body
+    assert '<Parameter name="to_number" value="+447888862925" />' in body
 
 
 def test_outbound_answer_carries_context(client, monkeypatch):
@@ -26,10 +29,10 @@ def test_outbound_answer_carries_context(client, monkeypatch):
         data={},
     )
     body = resp.text
-    assert "direction=outbound" in body
-    assert "call_id=11111111-1111-1111-1111-111111111111" in body
-    assert "contact_id=abc" in body
-    assert "campaign_id=def" in body
+    assert '<Parameter name="direction" value="outbound" />' in body
+    assert '<Parameter name="call_id" value="11111111-1111-1111-1111-111111111111" />' in body
+    assert '<Parameter name="contact_id" value="abc" />' in body
+    assert '<Parameter name="campaign_id" value="def" />' in body
 
 
 def test_status_callback_marks_no_answer(client, db):

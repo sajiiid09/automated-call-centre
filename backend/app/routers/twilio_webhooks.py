@@ -12,10 +12,9 @@ land. This handler adopts that row when the media stream connects.
 import asyncio
 import json
 import uuid
-from urllib.parse import urlencode
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import quoteattr
 
-from agent.pipeline import default_transport_params, greeting_frames
+from agent.pipeline import greeting_frames
 from fastapi import APIRouter, Depends, Request, WebSocket
 from fastapi.responses import Response
 from loguru import logger
@@ -40,7 +39,7 @@ from app.services.disposition import NO_CONVERSATION
 from app.services.twilio_auth import (
     stream_token,
     verify_twilio_request,
-    verify_twilio_websocket,
+    verify_twilio_stream,
 )
 
 router = APIRouter(prefix="/twilio", tags=["twilio"])
@@ -57,13 +56,25 @@ _PROGRESS_STATUS = {"initiated": "initiated", "queued": "initiated", "ringing": 
 
 
 def _stream_twiml(params: dict[str, str]) -> str:
+    """<Stream> to the media endpoint, call context as <Parameter> children.
+
+    The context used to ride in the URL's query string. Twilio does not
+    support that on <Stream>: it refuses the handshake outright, the call
+    drops the instant the caller connects, and the only trace is error 31920
+    on the Twilio side. Nested <Parameter>s are the supported channel — they
+    arrive as `customParameters` in the start message.
+    """
     ws_base = settings.public_base_url.replace("https://", "wss://", 1)
-    query = urlencode({k: v for k, v in params.items() if v})
-    url = escape(f"{ws_base}/twilio/media?{query}")
+    url = quoteattr(f"{ws_base}/twilio/media")
+    children = "".join(
+        f"<Parameter name={quoteattr(k)} value={quoteattr(v)} />"
+        for k, v in params.items()
+        if v
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response><Connect>"
-        f'<Stream url="{url}" />'
+        f"<Stream url={url}>{children}</Stream>"
         "</Connect></Response>"
     )
 
@@ -177,12 +188,13 @@ async def status_callback(request: Request, db: Session = Depends(get_db)) -> Re
 
 @router.websocket("/media")
 async def media_stream(websocket: WebSocket):
-    """Twilio Media Streams WebSocket → shared voice pipeline."""
-    if not verify_twilio_websocket(websocket):
-        logger.warning("Twilio media WS: rejected unsigned stream request")
-        await websocket.close(code=1008)
-        return
+    """Twilio Media Streams WebSocket → shared voice pipeline.
 
+    The call context arrives in the start message, not the URL: Twilio refuses
+    to handshake a <Stream> whose URL carries a query string. So the socket is
+    accepted first and authenticated from those parameters, before any session
+    is created or a single frame of audio is processed.
+    """
     await websocket.accept()
 
     # Twilio sends "connected" then "start" messages before audio flows
@@ -197,16 +209,25 @@ async def media_stream(websocket: WebSocket):
         await websocket.close()
         return
 
+    # query params still work for local probes and the test suite; Twilio's own
+    # <Parameter> values win where both are present
+    params = dict(websocket.query_params)
+    params.update({k: str(v) for k, v in (start_data.get("customParameters") or {}).items()})
+
+    if not verify_twilio_stream(params):
+        logger.warning("Twilio media WS: rejected unsigned stream request")
+        await websocket.close(code=1008)
+        return
+
     stream_sid = start_data["streamSid"]
     call_sid = start_data.get("callSid")
 
-    query = websocket.query_params
-    direction = query.get("direction", "inbound")
-    call_id = uuid.UUID(query["call_id"]) if query.get("call_id") else None
-    contact_id = uuid.UUID(query["contact_id"]) if query.get("contact_id") else None
-    campaign_id = uuid.UUID(query["campaign_id"]) if query.get("campaign_id") else None
-    from_number = query.get("from_number")
-    to_number = query.get("to_number")
+    direction = params.get("direction", "inbound")
+    call_id = uuid.UUID(params["call_id"]) if params.get("call_id") else None
+    contact_id = uuid.UUID(params["contact_id"]) if params.get("contact_id") else None
+    campaign_id = uuid.UUID(params["campaign_id"]) if params.get("campaign_id") else None
+    from_number = params.get("from_number")
+    to_number = params.get("to_number")
 
     if contact_id is None and from_number:
         contact_id = await asyncio.to_thread(_lookup_contact_by_phone, from_number)
@@ -217,14 +238,16 @@ async def media_stream(websocket: WebSocket):
         account_sid=settings.twilio_account_sid,
         auth_token=settings.twilio_auth_token,
     )
-    base = default_transport_params()
+    # Pipecat 1.7 moved VAD out of TransportParams and into a pipeline
+    # processor, so there is no vad_analyzer to carry over from the web-call
+    # params — reading one raised AttributeError and killed every media stream
+    # the instant Twilio connected.
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
         params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=False,
-            vad_analyzer=base.vad_analyzer,
             serializer=serializer,
         ),
     )

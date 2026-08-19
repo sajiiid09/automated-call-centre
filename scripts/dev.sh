@@ -86,10 +86,13 @@ say "Postgres healthy on localhost:5433"
 
 # --- 2. tunnel ------------------------------------------------------------
 # tee, so the window shows live logs *and* this script can read the URL back.
+# --protocol http2: cloudflared prefers QUIC, and this network drops outbound
+# UDP 7844 — the tunnel then never registers and every hostname it prints
+# answers 530, including the one already written into Twilio.
 
 say "starting cloudflared tunnel"
 tmux new-session -d -s "$SESSION" -n tunnel -c "$REPO_ROOT" \
-  "cloudflared tunnel --url http://localhost:$BACKEND_PORT --no-autoupdate 2>&1 | tee -a '$TUNNEL_LOG'"
+  "cloudflared tunnel --url http://localhost:$BACKEND_PORT --protocol http2 --no-autoupdate 2>&1 | tee -a '$TUNNEL_LOG'"
 
 PUBLIC_URL=""
 for _ in $(seq "$TUNNEL_WAIT_SECONDS"); do
